@@ -553,7 +553,9 @@ export namespace craysim
             this->check_reset_camspace (cam_to_scene); // if requested
             // Update the view matrix of eye and eye localspace axes
             this->eye->setViewMatrix (cam_to_scene);
-            this->agent_body->setViewMatrix (cam_to_scene);
+            if (this->agent_body != nullptr) {
+                this->agent_body->setViewMatrix (cam_to_scene);
+            }
             this->agent_coords->setViewMatrix (cam_to_scene);
         }
 
