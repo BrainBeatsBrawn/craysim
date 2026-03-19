@@ -7,7 +7,6 @@ module;
 #include <array>
 #include <memory>
 
-#include <sampleConfig.h>
 #include <MulticamScene.h>
 #include <libEyeRenderer.h> // getCurrentEyeSamplesPerOmmatidium
 
