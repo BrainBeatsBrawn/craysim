@@ -799,6 +799,11 @@ export namespace craysim
             this->isvp->set_instance_scale (iscl);
         }
 
+        std::vector<mplot::Visual<glver>*> dummy_other_windows = {};
+        std::vector<mplot::compoundray::EyeVisual<glver>*> dummy_other_eyes = {};
+        // Arg-free version of render_and_poll
+        void render_and_poll () { this->render_and_poll (dummy_other_windows, dummy_other_eyes); }
+
         // Save once-only data into the recording file (ommatidia data)
         void complete_recording()
         {
