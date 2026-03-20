@@ -506,7 +506,7 @@ export namespace craysim
                     this->hoverheight -= 0.0001f;
                     if (this->hoverheight < 0.0f) { this->hoverheight = 0.0f; }
                 }
-                sm::vec<float> mv_camframe = this->getMovementVector (60);
+                sm::vec<float> mv_camframe = this->getMovementVector (fps);
                 sm::vec<float> lastloc = cam_to_scene.translation();
                 sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
                 std::uint32_t ti0_sv = this->land->navmesh->ti0;
