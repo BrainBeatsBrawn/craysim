@@ -625,7 +625,7 @@ export namespace craysim
             this->agent_coords->setViewMatrix (cam_to_scene);
         }
 
-        bool subr_csv_playback (const float fps)
+        bool csv_playback (const float fps)
         {
             bool rtn = true;
 
@@ -767,7 +767,7 @@ export namespace craysim
                 if (this->vstate.test (craysim::visual<glver>::state::walk)) {
                     this->walk_over_land (this->fps_profiler.fps_mean);
                 } else if (this->sim_opts.test (craysim::options::path_from_csv)) { // Construct path from csv file of 2D ant locations
-                    if (this->subr_csv_playback (this->fps_profiler.fps_mean) == false) {
+                    if (this->csv_playback (this->fps_profiler.fps_mean) == false) {
                         // no more movements, so switch off path_from_csv mode
                         this->sim_opts.set (craysim::options::path_from_csv, false);
                     }
