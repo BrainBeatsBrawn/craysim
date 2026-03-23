@@ -1,12 +1,9 @@
-module;
-
-#include <sm/config>
-
 export module craysim.antbody;
 
 export import mplot.visualmodel;
 
 import sm.mat;
+import sm.config;
 
 export namespace craysim
 {
