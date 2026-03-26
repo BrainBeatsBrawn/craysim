@@ -22,6 +22,8 @@ import sm.vvec;
 import sm.quaternion;
 import sm.mat;
 import sm.hdfdata;
+import sm.algo;
+import sm.geometry;
 
 import mplot.tools;
 import mplot.compoundray.interop; // mathplot <--> compoundray interoperability
@@ -483,6 +485,86 @@ export namespace craysim
                 }
                 ++this->render_counter;
             }
+        }
+
+        // Obtain the current heading of the camera, with respect to the world/scene axes, where
+        // Visual::scene_right is North and Visual::scene_out is East.
+        // Return result in radians in range [0 2pi], with 0=N, pi/2=E, pi=S, 3pi/2=W.
+        float get_compass_heading_rad() const
+        {
+            // What's the orientation of cam_to_scene wrt to scene? It's just the rotation of cam_to_scene.
+            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            // Offset cam_to_scene back to origin
+            cam_to_scene.pretranslate (-cam_to_scene.translation());
+            // The camera's forwards direction is its z axis
+            sm::vec<float> cam_fwds = (cam_to_scene * sm::vec<float>::uz()).less_one_dim();
+            // Project this onto the scene ground plane
+            sm::vec<float> cam_fwds_proj = sm::geometry::vector_plane_projection (this->scene_up, cam_fwds);
+            // Now convert cam_fwds_proj to a 2D angle, using scene_right for N and scene_out for E.
+            // Choose a 2D heading vector so that the vector's 2D angle matches the angle used on a
+            // compass, which is 0 deg for N and +90 deg for E.
+            sm::vec<float, 2> heading2d = {
+                cam_fwds_proj.dot (this->scene_right), // N along 2D x axis
+                cam_fwds_proj.dot (this->scene_out)    // E along 2D y axis
+            };
+            float heading_r = heading2d.angle();
+            sm::algo::zero_to_twopi (heading_r);
+            return heading_r;
+        }
+
+        // Returns the compass heading in degrees, as on a regular compass, with 0 degrees meaning N
+        // and 90 degrees E.
+        float get_compass_heading() const
+        {
+            return this->get_compass_heading_rad() * sm::mathconst<float>::rad2deg;
+        }
+
+        std::string compass_degrees_to_str (float deg) const
+        {
+            constexpr float sdha = 22.5f / 2.0f; // single direction half angle
+            // The 'd' means divider
+            constexpr float Nd = 0.0f + sdha;
+            constexpr float NNEd = 22.5f + sdha;
+            constexpr float NEd = 45.0f + sdha;
+            constexpr float ENEd = 67.5f + sdha;
+            constexpr float Ed = 90.0f + sdha;
+            constexpr float ESEd = 112.5f + sdha;
+            constexpr float SEd = 135.0f + sdha;
+            constexpr float SSEd = 157.5f + sdha;
+            constexpr float Sd = 180.0f + sdha;
+            constexpr float SSWd = 202.5f + sdha;
+            constexpr float SWd = 225.0f + sdha;
+            constexpr float WSWd = 247.5f + sdha;
+            constexpr float Wd = 270.0f + sdha;
+            constexpr float WNWd = 292.5f + sdha;
+            constexpr float NWd = 315.0f + sdha;
+            constexpr float NNWd = 337.5f + sdha;
+
+            std::string dir = "";
+            if (deg > NNWd) { dir = "N"; }
+            else if (deg > NWd) { dir = "NNW"; }
+            else if (deg > WNWd) { dir = "NW"; }
+            else if (deg > Wd) { dir = "WNW"; }
+            else if (deg > WSWd) { dir = "W"; }
+            else if (deg > SWd) { dir = "WSW"; }
+            else if (deg > SSWd) { dir = "SW"; }
+            else if (deg > Sd) { dir = "SSW"; }
+            else if (deg > SSEd) { dir = "S"; }
+            else if (deg > SEd) { dir = "SSE"; }
+            else if (deg > ESEd) { dir = "SE"; }
+            else if (deg > Ed) { dir = "ESE"; }
+            else if (deg > ENEd) { dir = "E"; }
+            else if (deg > NEd) { dir = "ENE"; }
+            else if (deg > NNEd) { dir = "NE"; }
+            else if (deg > Nd) { dir = "NNE"; }
+            else { dir = "N"; }
+            return dir;
+        }
+
+        // Return 'N' or 'NNE' or equivalent for the heading direction
+        std::string get_compass_heading_str() const
+        {
+            return this->compass_degrees_to_str (this->get_compass_heading());
         }
 
         // Make a keyboard based movement over the landscape
