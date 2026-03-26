@@ -888,7 +888,7 @@ export namespace craysim
         // State for breadcrumb trail. A move counter
         std::uint64_t move_counter = 0u;
         // A maximum number of breadcrumbs to show
-        std::uint64_t max_bc = 32000;
+        std::uint64_t max_bc = 1000;
         // Container for breadcrumb locations
         sm::vvec<sm::vec<float, 3>> breadcrumb_coords = {};
         // Container for breadcrumb data (size, colour, alpha, etc)
