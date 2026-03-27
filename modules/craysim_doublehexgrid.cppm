@@ -196,9 +196,9 @@ export namespace craysim
         {
             // Here's a complication. In a transformed grid, we can't rely on these. Should be able
             // to *compute* them though.
-            float sr = this->hg->getSR();
-            float vne = this->hg->getVtoNE();
-            float lr = this->hg->getLR();
+            float sr = this->hg->get_sr();
+            float vne = this->hg->get_v_to_ne();
+            float lr = this->hg->get_lr();
 
             unsigned int nhex = this->hg->num();
 
@@ -288,7 +288,7 @@ export namespace craysim
                     // Use a single colour for each hex, even though hex z positions are
                     // interpolated. Do the _colour_ scaling:
                     std::array<float, 3> clr = this->setColour (hi);
-                    if (this->showboundary && (this->hg->vhexen[hi])->boundaryHex() == true) {
+                    if (this->showboundary && (this->hg->vhexen[hi])->boundary_hex() == true) {
                         this->markHex (hi);
                     }
                     if (this->showcentre && _x == 0.0f && _y == 0.0f) { this->markHex (hi); }
