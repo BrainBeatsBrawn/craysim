@@ -288,8 +288,9 @@ export namespace craysim
         // In-scene visualization of our compound-eye
         void setup_eyevisual()
         {
-            // We get the initial camera localspace. This also serves to reset the camera pose. This is set
-            // in the GLTF file and note that it may be a LEFT HANDED coordinate system!
+            // We get the initial camera localspace. This also serves to reset the camera pose. This
+            // is set in the GLTF file and note that it may be a LEFT HANDED coordinate system! We
+            // update this if we have a landscape, and it is updated to the first pose 'on the land'
             sm::mat<float, 4> ics = mplot::compoundray::getCameraSpace (scene);
             this->initial_camera_space.translate (ics.translation()); // Right handed
 
@@ -435,13 +436,16 @@ export namespace craysim
                     std::cout << "cam_to_scene is identity??\n";
                 }
             } else {
-                std::cout << "Failed to find the landscape; Camera position unchanged from glTF\n";
+                std::cout << "Failed to find the landscape; Camera position unchanged from glTF/CSV\n";
             }
 
             sm::mat<float, 4> _cam_to_scene = mplot::compoundray::getCameraSpace (scene);
             std::cout << "Got camera pose matrix from scene:\n" << _cam_to_scene << std::endl;
             sm::vec<float> _lastloc = _cam_to_scene.translation();
-            std::cout << "lastloc = " << _lastloc << " [this is cam_to_scene.translation()]" << std::endl;
+
+            // Update initial_camera_space
+            this->initial_camera_space.set_identity();
+            this->initial_camera_space.translate (_lastloc);
         }
 
         // Reset the camera location
@@ -955,7 +959,7 @@ export namespace craysim
         // Required in every craysim, I think. craysim::state? member of craysim::visual?
         std::vector<std::array<float, 3>> ommatidiaData;
         std::vector<Ommatidium>* ommatidia = nullptr;
-        // This is the start position of the camera as loaded from the gltf
+        // This is the start position of the camera as loaded from the gltf or as first located 'on the landscape'
         sm::mat<float, 4> initial_camera_space;
 
         // An mplot::VisualModel of the compound-ray eye
@@ -988,6 +992,10 @@ export namespace craysim
         sm::mat<float, 4> land_to_scene;
         // We can load data from a csv file for pre-defined paths
         sm::vvec<sm::vec<float, 2>> csv_positions;
+        // Home/nest locations. Client code can populate this and make use of it in any way that is useful.
+        sm::vvec<sm::vec<float>> home_locations;
+        // It may be useful to define some target locations, too.
+        sm::vvec<sm::vec<float>> target_locations;
         // When reproducing csv paths, it's useful to keep a record of the last triangle, because the
         // most likely next triangle is the last triangle.
         std::uint32_t last_ti = std::numeric_limits<std::uint32_t>::max();
