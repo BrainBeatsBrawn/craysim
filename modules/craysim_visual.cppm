@@ -942,6 +942,10 @@ export namespace craysim
             return this->oces_reader.read_success ? reinterpret_cast<mplot::meshgroup*>(&this->oces_reader.head_mesh) : nullptr;
         }
 
+        // Get the transform matrix defining the pose of the camera/agent. That's stored in agent_coords
+        sm::mat<float, 4> get_camera_pose() const { return this->agent_coords->getViewMatrix(); }
+
+
         // Our sim options.
         sm::flags<craysim::options> sim_opts;
         // A member fps_profiler
