@@ -945,6 +945,32 @@ export namespace craysim
         // Get the transform matrix defining the pose of the camera/agent. That's stored in agent_coords
         sm::mat<float, 4> get_camera_pose() const { return this->agent_coords->getViewMatrix(); }
 
+        /*
+         * Is the home location to the left of the agent/camera?
+         *
+         * \param home_Index The index into craysim::visual::home_locations from which to determine
+         * left-ness/right-ness
+         *
+         * \return true if location is to the left of the camera, else false
+         */
+        bool home_location_is_on_left (const std::uint32_t home_index = 0) const
+        {
+            if (home_index >= this->home_locations.size()) { return false; }
+            const float head_rad = this->get_compass_heading_rad();
+            const sm::vec<float> to_nest = this->home_locations[home_index] - this->get_camera_pose().translation();
+            const sm::vec<float> vec_to_nest = sm::geometry::vector_plane_projection (this->scene_up, to_nest);
+            // Convert compass heading into a 2D vector
+            const float head_rad_2 = sm::mathconst<float>::pi_over_2 - head_rad;
+            const sm::vec<float, 2> head_vec_2 = { std::cos (head_rad_2), std::sin (head_rad_2) };
+            // Make a 2D vector to the nest
+            const sm::vec<float, 2> to_nest_2 = { vec_to_nest[2], vec_to_nest[0] };
+            // Compute the angle to the nest
+            float angle_to_nest = head_vec_2.angle() - to_nest_2.angle();
+            sm::algo::minus_pi_to_pi (angle_to_nest);
+            // Angle gives left-ness
+            if (angle_to_nest > 0.0f) { return false; }
+            return true;
+        }
 
         // Our sim options.
         sm::flags<craysim::options> sim_opts;
