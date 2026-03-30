@@ -599,7 +599,7 @@ export namespace craysim
                 try {
                     cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
                     // Now we have moved, can compute instantaneous velocity
-                    this->instantaneous_velocity = cam_to_scene.translation() - this->tm1_cam_to_scene.translation();
+                    this->instantaneous_velocity = cam_to_scene.translation() - cam_to_scene_sv.translation();
 
                     this->tm1_ti0 = ti0_sv;
                     this->tm1_mv_camframe = mv_camframe;
@@ -671,7 +671,7 @@ export namespace craysim
                 // ti0, mv_camframe, cam_to_scene to save.
                 cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
                 // Now we have moved, can compute instantaneous velocity
-                this->instantaneous_velocity = cam_to_scene.translation() - this->tm1_cam_to_scene.translation();
+                this->instantaneous_velocity = cam_to_scene.translation() - cam_to_scene_sv.translation();
 
                 this->tm1_ti0 = ti0_sv;
                 this->tm1_mv_camframe = mv_camframe;
