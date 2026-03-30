@@ -43,7 +43,7 @@ import craysim.random_walk;
 // Reproduce controller functions for the mplot window for ease of use
 export namespace craysim
 {
-    void printHelp (const char* progname)
+    void print_help (const char* progname)
     {
         std::cout << "USAGE:\n" << progname << " -f <path to gltf scene>\n\n"
                   << "\t-h\tDisplay this help information.\n"
@@ -72,7 +72,7 @@ export namespace craysim
         for (std::int32_t i = 0; i < argc; i++) {
             std::string arg = std::string(argv[i]);
             if (arg == "-h") {
-                craysim::printHelp (argv[0]);
+                craysim::print_help (argv[0]);
                 opts |= craysim::options::can_exit;
             } else if (arg == "-f") {
                 path = std::string(argv[++i]);
@@ -93,7 +93,7 @@ export namespace craysim
             }
         }
         if (path.empty()) {
-            craysim::printHelp (argv[0]);
+            craysim::print_help (argv[0]);
             opts |= craysim::options::can_exit;
         }
 
@@ -184,7 +184,7 @@ export namespace craysim
             multicamAlloc(); setVerbosity (false);
 
             this->speed = 0.5f; // 0.5 m/s max speed for our agent
-            this->angularSpeed = 2.0f * mc::two_pi / 360.0f;
+            this->angular_speed = 2.0f * mc::two_pi / 360.0f;
             this->lightingEffects (true);
             // Use a non-default zFar as we are likely to use large environments
             this->zFar = 2400;
@@ -295,7 +295,7 @@ export namespace craysim
             this->initial_camera_space.translate (ics.translation()); // Right handed
 
             // Create an EyeVisual 'eye' in our scene
-            auto eyevm = std::make_unique<mplot::compoundray::EyeVisual<glver>> (sm::vec<>{}, &this->ommatidiaData, this->get_ommatidia_ptr(), this->get_head_mesh());
+            auto eyevm = std::make_unique<mplot::compoundray::EyeVisual<glver>> (sm::vec<>{}, &this->ommatidia_data, this->get_ommatidia_ptr(), this->get_head_mesh());
             eyevm->set_parent (this->get_id());
             eyevm->setViewMatrix (this->initial_camera_space);
             eyevm->name = "EyeVisual";
@@ -468,8 +468,8 @@ export namespace craysim
         {
             std::size_t curr_eye_size = this->last_eye_size;
             // Detect changes in the camera and update eye model as necessary
-            if (this->ommatidiaData.size() == 0) {
-                if (isCompoundEyeActive()) { getCameraData (this->ommatidiaData); }
+            if (this->ommatidia_data.size() == 0) {
+                if (isCompoundEyeActive()) { getCameraData (this->ommatidia_data); }
             } // else no need to re-get data
 
             // Update eyevm model (or just update colours)
@@ -576,23 +576,23 @@ export namespace craysim
         {
             this->agent_coords->setHide (!this->vstate.test(craysim::visual<glver>::state::show_camframe));
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
-            if (this->isActivelyRotating()) {
+            if (this->is_actively_rotating()) {
                 // Up-down (pitch) is rotation about local camera frame axis x
-                rotateCamerasLocallyAround (this->getVerticalRotationAngle(), 1.0f, 0.0f, 0.0f);
+                rotateCamerasLocallyAround (this->get_vertical_rotation_angle(), 1.0f, 0.0f, 0.0f);
                 // Left-and-right (yaw) is rotation about local camera frame axis y
-                rotateCamerasLocallyAround (this->getHorizontalRotationAngle(), 0.0f, 1.0f, 0.0f);
+                rotateCamerasLocallyAround (this->get_horizontal_rotation_angle(), 0.0f, 1.0f, 0.0f);
                 // Roll
-                rotateCamerasLocallyAround (this->getRollRotationAngle(), 0.0f, 0.0f, 1.0f);
+                rotateCamerasLocallyAround (this->get_roll_rotation_angle(), 0.0f, 0.0f, 1.0f);
                 cam_to_scene = mplot::compoundray::getCameraSpace (scene); // update
             }
-            if (this->isActivelyTranslating()) {
+            if (this->is_actively_translating()) {
                 if (this->move_state.test (craysim::visual<glver>::move_sense::up)) {
                     this->hoverheight += 0.0001f;
                 } else if (this->move_state.test (craysim::visual<glver>::move_sense::down)) {
                     this->hoverheight -= 0.0001f;
                     if (this->hoverheight < 0.0f) { this->hoverheight = 0.0f; }
                 }
-                sm::vec<float> mv_camframe = this->getMovementVector (fps);
+                sm::vec<float> mv_camframe = this->get_movement_vector (fps);
                 sm::vec<float> lastloc = cam_to_scene.translation();
                 sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
                 std::uint32_t ti0_sv = this->land->navmesh->ti0;
@@ -866,15 +866,15 @@ export namespace craysim
             renderFrame();
             // Access data so that a brain model could be fed
             if (isCompoundEyeActive()) {
-                getCameraData (this->ommatidiaData);
+                getCameraData (this->ommatidia_data);
                 this->ommatidia = &scene->m_ommVecs[scene->getCameraIndex()];
 
                 // if csv mode, then save the data
                 if (this->sim_opts.test (craysim::options::path_from_csv) && this->sim_opts.test (craysim::options::save_hdf5)) {
                     std::cout << "Saving frame...\n";
-                    std::string ommframe = "/ommatidiaData/frame_" + std::to_string (this->move_counter);
+                    std::string ommframe = "/ommatidia_data/frame_" + std::to_string (this->move_counter);
                     try {
-                        record.add_contained_vals (ommframe.c_str(), this->ommatidiaData);
+                        record.add_contained_vals (ommframe.c_str(), this->ommatidia_data);
                     } catch (const std::exception& e) {
                         // Probably didn't move this time.
                     }
@@ -987,7 +987,7 @@ export namespace craysim
         // Open Compound Eye Standard reader used to access an agent head mesh (compound-ray reads the ommatidia info)
         oces::reader oces_reader;
         // Required in every craysim, I think. craysim::state? member of craysim::visual?
-        std::vector<std::array<float, 3>> ommatidiaData;
+        std::vector<std::array<float, 3>> ommatidia_data;
         std::vector<Ommatidium>* ommatidia = nullptr;
         // This is the start position of the camera as loaded from the gltf or as first located 'on the landscape'
         sm::mat<float, 4> initial_camera_space;
@@ -1049,14 +1049,17 @@ export namespace craysim
 
 
         // Movement state (class and bitset) (flags?)
-        enum class move_sense : uint16_t { forward, backward, left, right, up, down, rotUp, rotDown, rotLeft, rotRight, rotRollLeft, rotRollRight, zoomIn, zoomOut };
+        enum class move_sense : uint16_t {
+            forward, backward, left, right, up, down,
+            rot_up, rot_down, rot_left, rot_right, rot_roll_left, rot_roll_right
+        };
         sm::flags<move_sense> move_state;
 
         // Speed of translations (in scene units per second). From this determine distance for one
         // movement step based on current FPS/seconds per frame
         float speed = 1.0f;
         // Speed of rotations
-        float angularSpeed = mc::two_pi / 360.0f;
+        float angular_speed = mc::two_pi / 360.0f;
         // Parameter for EyeVisual. If focal offset is 0, then user has to choose how long the cones should be
         float manual_cone_length = 0.2f;
 
@@ -1077,8 +1080,8 @@ export namespace craysim
             this->stop();
         }
 
-        // Get the camera's movement vector to give speed in model world at the current FPS
-        sm::vec<float, 3> getMovementVector (const float fps)
+        // Get the camera's key-commanded movement vector to give speed in model world at the current FPS
+        sm::vec<float, 3> get_movement_vector (const float fps)
         {
             sm::vec<float, 3> output = {};
             if (this->move_state.test (move_sense::up)) { output += 0.1f * speed / fps * sm::vec<>::uy(); } // uy is up
@@ -1091,54 +1094,51 @@ export namespace craysim
         }
 
         // Get the camera's vertical rotation angle (pitch).
-        float getVerticalRotationAngle()
+        float get_vertical_rotation_angle()
         {
             float out = 0.0f;
-            if (this->move_state.test (move_sense::rotUp)) { out += angularSpeed; }
-            if (this->move_state.test (move_sense::rotDown)) { out -= angularSpeed; }
+            if (this->move_state.test (move_sense::rot_up)) { out += angular_speed; }
+            if (this->move_state.test (move_sense::rot_down)) { out -= angular_speed; }
             return out;
         }
 
         // Get the camera's horizontal rotation angle (yaw). Rightward is positive.
-        float getHorizontalRotationAngle()
+        float get_horizontal_rotation_angle()
         {
             float out = 0.0f;
-            if (this->move_state.test (move_sense::rotLeft)) { out += angularSpeed; }
-            if (this->move_state.test (move_sense::rotRight)) { out -= angularSpeed; }
+            if (this->move_state.test (move_sense::rot_left)) { out += angular_speed; }
+            if (this->move_state.test (move_sense::rot_right)) { out -= angular_speed; }
             return out;
         }
 
         // Get the camera's roll
-        float getRollRotationAngle()
+        float get_roll_rotation_angle()
         {
             float out = 0.0f;
-            if (this->move_state.test (move_sense::rotRollLeft)) { out -= angularSpeed; }
-            if (this->move_state.test (move_sense::rotRollRight)) { out += angularSpeed; }
+            if (this->move_state.test (move_sense::rot_roll_left)) { out -= angular_speed; }
+            if (this->move_state.test (move_sense::rot_roll_right)) { out += angular_speed; }
             return out;
         }
 
-        bool isActivelyRotating()
+        // Really "do we have a rotation command?"
+        bool is_actively_rotating()
         {
-            return (this->move_state.test (move_sense::rotUp)
-                    || this->move_state.test (move_sense::rotDown)
-                    || this->move_state.test (move_sense::rotLeft)
-                    || this->move_state.test (move_sense::rotRight)
-                    || this->move_state.test (move_sense::rotRollLeft)
-                    || this->move_state.test (move_sense::rotRollRight));
+            return this->move_state.any_of ({
+                    move_sense::rot_up, move_sense::rot_down,
+                    move_sense::rot_left, move_sense::rot_right,
+                    move_sense::rot_roll_left, move_sense::rot_roll_right });
         }
 
-        bool isActivelyTranslating()
+        bool is_actively_translating()
         {
-            return (this->move_state.test (move_sense::up)
-                    || this->move_state.test (move_sense::down)
-                    || this->move_state.test (move_sense::left)
-                    || this->move_state.test (move_sense::right)
-                    || this->move_state.test (move_sense::forward)
-                    || this->move_state.test (move_sense::backward));
+            return this->move_state.any_of ({
+                    move_sense::up, move_sense::down,
+                    move_sense::left, move_sense::right,
+                    move_sense::forward, move_sense::backward });
         }
 
         // Is the camera 'actively moving'?
-        bool isActivelyMoving() { return this->move_state.any(); }
+        bool is_actively_moving() { return this->move_state.any(); }
 
         // Cancel any movement. Also unpause
         void stop()
@@ -1176,22 +1176,22 @@ export namespace craysim
                     this->move_state.set (move_sense::down);
                 } else if (key == mplot::key::up) {
                     this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rotUp);
+                    this->move_state.set (move_sense::rot_up);
                 } else if (key == mplot::key::down) {
                     this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rotDown);
+                    this->move_state.set (move_sense::rot_down);
                 } else if (key == mplot::key::left) {
                     this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rotLeft);
+                    this->move_state.set (move_sense::rot_left);
                 } else if (key == mplot::key::right) {
                     this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rotRight);
+                    this->move_state.set (move_sense::rot_right);
                 } else if (key == mplot::key::comma) {
                     this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rotRollLeft);
+                    this->move_state.set (move_sense::rot_roll_left);
                 } else if (key == mplot::key::period) {
                     this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rotRollRight);
+                    this->move_state.set (move_sense::rot_roll_right);
                 } else if (key == mplot::key::end) {
                     this->speed = this->speed * 0.5f;
                     std::cout << "Speed reduced to " << this->speed  << "m/s" << std::endl;
@@ -1218,17 +1218,17 @@ export namespace craysim
                 } else if (key == mplot::key::l) {
                     this->move_state.reset (move_sense::down);
                 } else if (key == mplot::key::up) {
-                    this->move_state.reset (move_sense::rotUp);
+                    this->move_state.reset (move_sense::rot_up);
                 } else if (key == mplot::key::down) {
-                    this->move_state.reset (move_sense::rotDown);
+                    this->move_state.reset (move_sense::rot_down);
                 } else if (key == mplot::key::left) {
-                    this->move_state.reset (move_sense::rotLeft);
+                    this->move_state.reset (move_sense::rot_left);
                 } else if (key == mplot::key::right) {
-                    this->move_state.reset (move_sense::rotRight);
+                    this->move_state.reset (move_sense::rot_right);
                 } else if (key == mplot::key::comma) {
-                    this->move_state.reset (move_sense::rotRollLeft);
+                    this->move_state.reset (move_sense::rot_roll_left);
                 } else if (key == mplot::key::period) {
-                    this->move_state.reset (move_sense::rotRollRight);
+                    this->move_state.reset (move_sense::rot_roll_right);
                 }
             }
 
