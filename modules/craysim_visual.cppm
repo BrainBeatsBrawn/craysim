@@ -183,8 +183,6 @@ export namespace craysim
             // Boilerplate memory alloc for compound-ray and turn off verbose logging.
             multicamAlloc(); setVerbosity (false);
 
-            this->speed = 0.5f; // 0.5 m/s max speed for our agent
-            this->angular_speed = 2.0f * mc::two_pi / 360.0f;
             this->lightingEffects (true);
             // Use a non-default zFar as we are likely to use large environments
             this->zFar = 2400;
@@ -460,6 +458,10 @@ export namespace craysim
                 cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight);
                 setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
                 this->vstate.reset (state::campose_reset_request);
+                // t-1 values:
+                this->tm1_ti0 = _ti0;
+                this->tm1_mv_camframe = {};
+                this->tm1_cam_to_scene = cam_to_scene;
             }
         }
 
@@ -476,18 +478,16 @@ export namespace craysim
             this->eye->ommatidia = this->get_ommatidia_ptr();
             for (auto oe : other_eyes) { oe->ommatidia = this->get_ommatidia_ptr(); }
 
-            static constexpr std::uint32_t render_every = 1u; // set to 1 for max update, 60 to reduce compute
             if (this->ommatidia != nullptr) {
                 curr_eye_size = this->ommatidia->size();
                 if (curr_eye_size != this->last_eye_size) {
-                    if (this->render_counter % render_every == 0u) { this->eye->reinit(); }
+                    this->eye->reinit();
                     for (auto oe : other_eyes) { oe->reinit(); }
                     this->last_eye_size = curr_eye_size;
                 } else {
-                    if (this->render_counter % render_every == 0u) { this->eye->reinitColours(); }
+                    this->eye->reinitColours();
                     for (auto oe : other_eyes) { oe->reinitColours(); } // 4x faster to just reinitColours
                 }
-                ++this->render_counter;
             }
         }
 
@@ -598,6 +598,8 @@ export namespace craysim
                 std::uint32_t ti0_sv = this->land->navmesh->ti0;
                 try {
                     cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
+                    // Now we have moved, can compute instantaneous velocity
+                    this->instantaneous_velocity = cam_to_scene.translation() - this->tm1_cam_to_scene.translation();
 
                     this->tm1_ti0 = ti0_sv;
                     this->tm1_mv_camframe = mv_camframe;
@@ -668,6 +670,9 @@ export namespace craysim
 
                 // ti0, mv_camframe, cam_to_scene to save.
                 cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
+                // Now we have moved, can compute instantaneous velocity
+                this->instantaneous_velocity = cam_to_scene.translation() - this->tm1_cam_to_scene.translation();
+
                 this->tm1_ti0 = ti0_sv;
                 this->tm1_mv_camframe = mv_camframe;
                 this->tm1_cam_to_scene = cam_to_scene_sv;
@@ -755,6 +760,10 @@ export namespace craysim
                     if (cam_to_scene != sm::mat<float, 4>::identity()) {
                         setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
                     } // else what to do if cam_to_scene is identity?
+
+                    // Now we have moved, can compute instantaneous velocity
+                    this->instantaneous_velocity = cam_to_scene.translation() - lastcamloc;
+
                 } else {
                     // Rather than throwing, could just move on to next in csv?
                     // throw std::runtime_error ("Failed to find the landscape so can't teleport to that location!?!");
@@ -826,12 +835,20 @@ export namespace craysim
 
         void end_loop_timer() { this->fps_profiler.at_end(); }
 
-        // Call this from your main loop
-        void render_and_poll (std::vector<mplot::Visual<glver>*>& other_windows,
-                              std::vector<mplot::compoundray::EyeVisual<glver>*>& other_eyes)
+        // Allows client code to set up other windows etc
+        std::vector<mplot::Visual<glver>*> other_windows = {};
+        std::vector<mplot::compoundray::EyeVisual<glver>*> other_eyes = {};
+        std::vector<mplot::Visual<glver>*> slow_windows = {};
+        // How many fast renders to wait until we re-render the slow windows?
+        std::uint64_t slow_every = 10u;
+
+        // Call this from your main loop. Returns true if slow windows were processed
+        bool render_and_poll ()
         {
-            // The current camera may have changed, this subroutine deals with any changes
-            this->detect_camera_changes (other_eyes);
+            ++this->render_counter;
+
+            // The current camera may have changed, this subroutine deals with any changes in this->eye and other_eyes
+            this->detect_camera_changes (this->other_eyes); // reinits the eyes
 
             // Now render the mathplot window
             this->render();
@@ -841,18 +858,26 @@ export namespace craysim
             // Save some electricity while developing - limit to 60 FPS. For max speed use this->poll() (-x)
             if (this->sim_opts.test (craysim::options::max_fps)) { this->poll(); } else { this->wait (0.0167); }
 
-            // Render the eye-only window
-            for (auto owin : other_windows) { owin->render(); }
+            // Render the other windows
+            if ((this->render_counter % this->slow_every) == 0u) {
+                for (auto swin : this->slow_windows) { swin->render(); }
+            }
+            for (auto owin : this->other_windows) { owin->render(); }
 
             // Deal with any movements commanded by key press events (including reset)
 
             this->setContext(); // right now key move over land needs main window's context
 
+            this->instantaneous_velocity = {}; // velocity computed per render cycle
+
+            // Any of the following movement-creating functions will set the instantaneous velocity
+
             // walk/csv playback/check keys for movement command
             if (this->vstate.test (craysim::visual<glver>::state::paused) == false) {
                 if (this->vstate.test (craysim::visual<glver>::state::walk)) {
                     this->walk_over_land (this->fps_profiler.fps_mean);
-                } else if (this->sim_opts.test (craysim::options::path_from_csv)) { // Construct path from csv file of 2D ant locations
+                } else if (this->sim_opts.test (craysim::options::path_from_csv)) {
+                    // Construct path from csv file of 2D agent locations
                     if (this->csv_playback (this->fps_profiler.fps_mean) == false) {
                         // no more movements, so switch off path_from_csv mode
                         this->sim_opts.set (craysim::options::path_from_csv, false);
@@ -870,26 +895,21 @@ export namespace craysim
                 this->ommatidia = &scene->m_ommVecs[scene->getCameraIndex()];
 
                 // if csv mode, then save the data
-                if (this->sim_opts.test (craysim::options::path_from_csv) && this->sim_opts.test (craysim::options::save_hdf5)) {
+                if (this->sim_opts.all_of ({craysim::options::path_from_csv, craysim::options::save_hdf5})) {
                     std::cout << "Saving frame...\n";
                     std::string ommframe = "/ommatidia_data/frame_" + std::to_string (this->move_counter);
                     try {
                         record.add_contained_vals (ommframe.c_str(), this->ommatidia_data);
-                    } catch (const std::exception& e) {
-                        // Probably didn't move this time.
-                    }
+                    } catch (const std::exception& e) {} // Probably didn't move this time.
                 }
             }
 
             // Scale size of breadcrumbs based on distance
             float iscl = 2.0f * std::log (1.0f + this->get_d_to_rotation_centre());
             this->isvp->set_instance_scale (iscl);
-        }
 
-        std::vector<mplot::Visual<glver>*> dummy_other_windows = {};
-        std::vector<mplot::compoundray::EyeVisual<glver>*> dummy_other_eyes = {};
-        // Arg-free version of render_and_poll
-        void render_and_poll () { this->render_and_poll (dummy_other_windows, dummy_other_eyes); }
+            return (this->render_counter % this->slow_every) == 0u;
+        }
 
         // Save once-only data into the recording file (ommatidia data)
         void complete_recording()
@@ -948,6 +968,12 @@ export namespace craysim
         /*
          * Is the home location to the left of the agent/camera?
          *
+         * If scene_up is uy(), then 3d x axis is north. The 3d z axis maps to the 2d x axis and the
+         * 3d x axis maps to the 2d y axis.
+         *
+         * If scene_up is uz(), then 3d y axis is north. The 3d x axis maps to 2d x axis and 3d y
+         * axis maps to 2d y axis.
+         *
          * \param home_Index The index into craysim::visual::home_locations from which to determine
          * left-ness/right-ness
          *
@@ -963,13 +989,40 @@ export namespace craysim
             const float head_rad_2 = sm::mathconst<float>::pi_over_2 - head_rad;
             const sm::vec<float, 2> head_vec_2 = { std::cos (head_rad_2), std::sin (head_rad_2) };
             // Make a 2D vector to the nest
-            const sm::vec<float, 2> to_nest_2 = { vec_to_nest[2], vec_to_nest[0] };
+            sm::vec<float, 2> to_nest_2 = {};
+            if (this->scene_up == sm::vec<float>::uy()) {
+                to_nest_2 = { vec_to_nest[2], vec_to_nest[0] };
+            } else if (this->scene_up == sm::vec<float>::uz()) {
+                to_nest_2 = { vec_to_nest[0], vec_to_nest[1] };
+            } else {
+            }
             // Compute the angle to the nest
             float angle_to_nest = head_vec_2.angle() - to_nest_2.angle();
             sm::algo::minus_pi_to_pi (angle_to_nest);
             // Angle gives left-ness
             if (angle_to_nest > 0.0f) { return false; }
             return true;
+        }
+
+        /*!
+         * Return instantaneous velocity in the 2 dimensional plane defined by scene_up.
+         *
+         * If scene_up is uy(), then 3d x axis is north. The 3d z axis maps to the 2d x axis and the
+         * 3d x axis maps to the 2d y axis.
+         *
+         * If scene_up is uz(), then 3d y axis is north. The 3d x axis maps to 2d x axis and 3d y
+         * axis maps to 2d y axis.
+         */
+        sm::vec<float, 2> get_velocity_2d () const
+        {
+            const sm::vec<float> inst_v_projected = sm::geometry::vector_plane_projection (this->scene_up, this->instantaneous_velocity);
+            if (this->scene_up == sm::vec<float>::uy()) {
+                return sm::vec<float, 2>{ inst_v_projected[2], inst_v_projected[0] };
+            } else if (this->scene_up == sm::vec<float>::uz()) {
+                return sm::vec<float, 2>{ inst_v_projected[0], inst_v_projected[1] };
+            } else {
+                throw std::runtime_error ("craysim::visual::get_velocity_2d: Don't know what to do unless scene_up is uy() or uz()");
+            }
         }
 
         // Our sim options.
@@ -1001,6 +1054,8 @@ export namespace craysim
 
         // Visualization of a breadcrumb trail
         mplot::InstancedScatterVisual<glver>* isvp = nullptr;
+        // Track how many calls to render have been made. At 1000 FPS this overflows at 10^17 seconds which is about 10^9 years.
+        std::uint64_t render_counter = 0u;
         // State for breadcrumb trail. A move counter
         std::uint64_t move_counter = 0u;
         // A maximum number of breadcrumbs to show
@@ -1033,13 +1088,11 @@ export namespace craysim
         float hoverheight = 0.01f;
         // We keep a track of the eye size. Used in detect_camera_changes
         std::size_t last_eye_size = 0u;
-        // A count of renders is required in detect_camera_changes
-        std::uint32_t render_counter = 0u;
 
         // Random route generation object
         std::unique_ptr<craysim::random_walk<float>> rrg;
 
-        // For debug saving
+        // For debug saving and computation of instantaneous velocity
         sm::mat<float, 4> tm1_cam_to_scene;
         sm::vec<float> tm1_mv_camframe = {};
         std::uint32_t tm1_ti0 = 0u;
@@ -1057,9 +1110,13 @@ export namespace craysim
 
         // Speed of translations (in scene units per second). From this determine distance for one
         // movement step based on current FPS/seconds per frame
-        float speed = 1.0f;
+        float speed = 0.5f;
         // Speed of rotations
-        float angular_speed = mc::two_pi / 360.0f;
+        float angular_speed = 2.0f * mc::two_pi / 360.0f;
+
+        // The instantaneous velocity arising from the last movement
+        sm::vec<float> instantaneous_velocity = {};
+
         // Parameter for EyeVisual. If focal offset is 0, then user has to choose how long the cones should be
         float manual_cone_length = 0.2f;
 
@@ -1129,6 +1186,7 @@ export namespace craysim
                     move_sense::rot_roll_left, move_sense::rot_roll_right });
         }
 
+        // Really "do we have a translation command?"
         bool is_actively_translating()
         {
             return this->move_state.any_of ({
