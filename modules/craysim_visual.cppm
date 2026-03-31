@@ -57,6 +57,8 @@ export namespace craysim
         blender_axes,     // Set true to transform glTF into Blender's z-up axes
         max_fps,          // If true, poll, instead of fps
         path_from_csv,    // Move the agent from a pre-defined sequence of 2D coordinates that give it a path
+        api_movement,     // Client code sets a vec/quat or mat for movement in the next render_and_poll()
+        homing_mode,      // A flag for a 'go home' mode. It's up to client code to decide what to do with this.
         have_json_config, // user passed a json config file
         save_hdf5,        // If true, then save any output data in HDF5 (active in 'path_from_csv' mode)
         debug_mv,         // Open a debug h5 file (craysim.h5) and run compute_mesh_movement once for debug of NavMesh
@@ -585,10 +587,73 @@ export namespace craysim
             return this->compass_degrees_to_str (this->get_compass_heading());
         }
 
+        void api_move_over_land()
+        {
+            // Check vec/quat/matrix and then make mv_camframe
+            rotateCamerasLocallyAround (this->api_cam_rotn_angle,
+                                        this->api_cam_rotn_axis[0],
+                                        this->api_cam_rotn_axis[1],
+                                        this->api_cam_rotn_axis[2]);
+
+            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+
+            // move by this->api_cam_mv; along z (for now?)
+            sm::vec<float> mv_camframe = this->api_cam_mv;
+            sm::vec<float> lastloc = cam_to_scene.translation();
+            sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
+            std::uint32_t ti0_sv = this->land->navmesh->ti0;
+            try {
+                cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
+                // Now we have moved, can compute instantaneous velocity
+                this->instantaneous_velocity = cam_to_scene.translation() - cam_to_scene_sv.translation();
+
+                this->tm1_ti0 = ti0_sv;
+                this->tm1_mv_camframe = mv_camframe;
+                this->tm1_cam_to_scene = cam_to_scene_sv;
+
+            } catch (const std::exception& e) {
+                std::string msg (e.what());
+                std::cout << "Exception: " << msg << std::endl;
+                if (msg.find ("off-edge:") == 0) {
+                    std::cout << "We went off the edge. Key move not possible. Don't crash.\n";
+                    this->land->navmesh->ti0 = ti0_sv;
+                } else {
+                    std::cout << "key-command move was not possible...\n";
+                    {
+                        // Duplicated code from key_move...
+                        std::cout << "Saving compute_mesh_movement data\n";
+                        std::cout << "mv_camframe: " << mv_camframe << " and tm1_mv_camframe: " << this->tm1_mv_camframe << std::endl;
+                        std::cout << "cam_to_scene_sv is\n" << cam_to_scene_sv
+                                  << "\nand tm1_cam_to_scene:\n" << this->tm1_cam_to_scene << std::endl;
+                        sm::hdfdata dsv ("./craysim.h5", std::ios::out | std::ios::trunc);
+                        dsv.add_contained_vals ("/mv_camframe", mv_camframe);
+                        dsv.add_contained_vals ("/cam_to_scene", cam_to_scene_sv.arr);
+                        dsv.add_contained_vals ("/land_to_scene", this->land_to_scene.arr);
+                        dsv.add_val ("/hoverheight", this->hoverheight);
+                        dsv.add_val ("/ti0", ti0_sv);
+                        // Also save t-1 values:
+                        dsv.add_contained_vals ("/tm1_mv_camframe", this->tm1_mv_camframe);
+                        dsv.add_contained_vals ("/tm1_cam_to_scene", this->tm1_cam_to_scene.arr);
+                        dsv.add_val ("/tm1_ti0", this->tm1_ti0);
+                    }
+                    throw e;
+                }
+            }
+
+            setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
+
+            this->add_breadcrumb (lastloc);
+
+            this->eye->setViewMatrix (cam_to_scene);
+            if (this->agent_body != nullptr) {
+                this->agent_body->setViewMatrix (cam_to_scene);
+            }
+            this->agent_coords->setViewMatrix (cam_to_scene);
+        }
+
         // Make a keyboard based movement over the landscape
         void key_move_over_land (const float fps)
         {
-            this->agent_coords->setHide (!this->vstate.test(craysim::visual<glver>::state::show_camframe));
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
             if (this->is_actively_rotating()) {
                 // Up-down (pitch) is rotation about local camera frame axis x
@@ -662,7 +727,6 @@ export namespace craysim
 
         void walk_over_land (const float fps)
         {
-            this->agent_coords->setHide (!this->vstate.test(craysim::visual<glver>::state::show_camframe));
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
 
             // A random walk mode
@@ -671,18 +735,13 @@ export namespace craysim
             // set rotation and step length according to the Stone paper
             this->rrg->step();
             // rrg.omega is the angular speed rrg.speed is the linear speed
-            //std::cout << "rotating in this step by " << this->rrg->omega << " and moving forward by " << this->rrg->speed << std::endl;
             rotateCamerasLocallyAround (this->rrg->omega, 0.0f, 1.0f, 0.0f);
             cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            // ti0, mv_camframe, cam_to_scene to save.
             sm::vec<float> mv_camframe = { 0, 0, this->rrg->speed };
             sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
             std::uint32_t ti0_sv = this->land->navmesh->ti0;
             try {
-                // Note that even if the last mesh movement would land on a triangle, a further
-                // rotation might mean that we get a 'no triangle intersection' exception (esp. if
-                // we are on the edge of a
-
-                // ti0, mv_camframe, cam_to_scene to save.
                 cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
                 // Now we have moved, can compute instantaneous velocity
                 this->instantaneous_velocity = cam_to_scene.translation() - cam_to_scene_sv.translation();
@@ -700,13 +759,12 @@ export namespace craysim
                     this->rrg->about_turn();
                     this->land->navmesh->ti0 = ti0_sv;
                 } else {
-                    //cam_to_scene = cam_to_scene_sv;
                     this->sim_opts.set (craysim::options::max_fps, false); // don't burn electricity after exception
                     this->vstate.set (craysim::visual<glver>::state::walk, false);
                     {
-                        std::cout << "Saving compute_mesh_movement data\n";
-                        std::cout << "mv_camframe: " << mv_camframe << " and tm1_mv_camframe: " << this->tm1_mv_camframe << std::endl;
-                        std::cout << "cam_to_scene_sv is\n" << cam_to_scene_sv
+                        std::cout << "Saving compute_mesh_movement data\n"
+                                  << "mv_camframe: " << mv_camframe << " and tm1_mv_camframe: " << this->tm1_mv_camframe
+                                  << "\ncam_to_scene_sv is\n" << cam_to_scene_sv
                                   << "\nand tm1_cam_to_scene:\n" << this->tm1_cam_to_scene << std::endl;
                         sm::hdfdata dsv ("./craysim.h5", std::ios::out | std::ios::trunc);
                         dsv.add_contained_vals ("/mv_camframe", mv_camframe);
@@ -734,7 +792,6 @@ export namespace craysim
         {
             bool rtn = true;
 
-            this->agent_coords->setHide (!this->vstate.test(craysim::visual<glver>::state::show_camframe));
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
 
             if (this->csv_positions.size() > this->move_counter) {
@@ -884,10 +941,13 @@ export namespace craysim
 
             this->instantaneous_velocity = {}; // velocity computed per render cycle
 
-            // Any of the following movement-creating functions will set the instantaneous velocity
+            this->agent_coords->setHide (!this->vstate.test(craysim::visual<glver>::state::show_camframe));
 
+            // Any of the following movement-creating functions will set the instantaneous velocity
+            //
             // walk/csv playback/check keys for movement command
             if (this->vstate.test (craysim::visual<glver>::state::paused) == false) {
+
                 if (this->vstate.test (craysim::visual<glver>::state::walk)) {
                     this->walk_over_land (this->fps_profiler.fps_mean);
                 } else if (this->sim_opts.test (craysim::options::path_from_csv)) {
@@ -896,6 +956,9 @@ export namespace craysim
                         // no more movements, so switch off path_from_csv mode
                         this->sim_opts.set (craysim::options::path_from_csv, false);
                     }
+                } else if (this->sim_opts.test (craysim::options::api_movement)) {
+                    // React to movements commanded by vec/quaternion or transformation matrix
+                    // (i.e. by client code).
                 } else {
                     this->key_move_over_land (this->fps_profiler.fps_mean);
                 }
@@ -1122,17 +1185,14 @@ export namespace craysim
         };
         sm::flags<move_sense> move_state;
 
-        // Speed of translations (in scene units per second). From this determine distance for one
-        // movement step based on current FPS/seconds per frame
-        float speed = 0.5f;
+        // Speed of translations commanded by key press (in scene units per second). From this
+        // determine distance for one movement step based on current FPS/seconds per frame
+        float kcmd_speed = 0.5f;
         // Speed of rotations
-        float angular_speed = 2.0f * mc::two_pi / 360.0f;
+        float kcmd_angular_speed = 2.0f * mc::two_pi / 360.0f;
 
         // The instantaneous velocity arising from the last movement
         sm::vec<float> instantaneous_velocity = {};
-
-        // Parameter for EyeVisual. If focal offset is 0, then user has to choose how long the cones should be
-        float manual_cone_length = 0.2f;
 
         enum class state : uint8_t {
             show_cones,            // Parameter for EyeVisual. Draw simple flared tubes in mathplot window
@@ -1151,16 +1211,27 @@ export namespace craysim
             this->stop();
         }
 
+        // Movement API
+        sm::vec<float> api_cam_rotn_axis = this->scene_up;
+        float api_cam_rotn_angle = 0.0f;
+        sm::vec<float> api_cam_mv = {}; // A movement in the camera's frame. z is forwards.
+        void rotate_camera (const sm::vec<float>& _axis, const float _angle)
+        {
+            this->api_cam_rotn_axis = _axis;
+            this->api_cam_rotn_angle = _angle;
+        }
+        void move_camera (sm::vec<float>& v) { this->api_cam_mv = v; }
+
         // Get the camera's key-commanded movement vector to give speed in model world at the current FPS
         sm::vec<float, 3> get_movement_vector (const float fps)
         {
             sm::vec<float, 3> output = {};
-            if (this->move_state.test (move_sense::up)) { output += 0.1f * speed / fps * sm::vec<>::uy(); } // uy is up
-            if (this->move_state.test (move_sense::down)) { output += 0.1f * speed / fps * -sm::vec<>::uy(); }
-            if (this->move_state.test (move_sense::left)) { output += speed / fps * sm::vec<>::ux(); }
-            if (this->move_state.test (move_sense::right)) { output += speed / fps * -sm::vec<>::ux(); }    // right is in -x dirn
-            if (this->move_state.test (move_sense::forward)) { output += speed / fps * sm::vec<>::uz(); }   // fwd is in uz dirn
-            if (this->move_state.test (move_sense::backward)) { output += speed / fps * -sm::vec<>::uz(); }
+            if (this->move_state.test (move_sense::up)) { output += 0.1f * kcmd_speed / fps * sm::vec<>::uy(); } // uy is up
+            if (this->move_state.test (move_sense::down)) { output += 0.1f * kcmd_speed / fps * -sm::vec<>::uy(); }
+            if (this->move_state.test (move_sense::left)) { output += kcmd_speed / fps * sm::vec<>::ux(); }
+            if (this->move_state.test (move_sense::right)) { output += kcmd_speed / fps * -sm::vec<>::ux(); }    // right is in -x dirn
+            if (this->move_state.test (move_sense::forward)) { output += kcmd_speed / fps * sm::vec<>::uz(); }   // fwd is in uz dirn
+            if (this->move_state.test (move_sense::backward)) { output += kcmd_speed / fps * -sm::vec<>::uz(); }
             return output;
         }
 
@@ -1168,8 +1239,8 @@ export namespace craysim
         float get_vertical_rotation_angle()
         {
             float out = 0.0f;
-            if (this->move_state.test (move_sense::rot_up)) { out += angular_speed; }
-            if (this->move_state.test (move_sense::rot_down)) { out -= angular_speed; }
+            if (this->move_state.test (move_sense::rot_up)) { out += kcmd_angular_speed; }
+            if (this->move_state.test (move_sense::rot_down)) { out -= kcmd_angular_speed; }
             return out;
         }
 
@@ -1177,8 +1248,8 @@ export namespace craysim
         float get_horizontal_rotation_angle()
         {
             float out = 0.0f;
-            if (this->move_state.test (move_sense::rot_left)) { out += angular_speed; }
-            if (this->move_state.test (move_sense::rot_right)) { out -= angular_speed; }
+            if (this->move_state.test (move_sense::rot_left)) { out += kcmd_angular_speed; }
+            if (this->move_state.test (move_sense::rot_right)) { out -= kcmd_angular_speed; }
             return out;
         }
 
@@ -1186,8 +1257,8 @@ export namespace craysim
         float get_roll_rotation_angle()
         {
             float out = 0.0f;
-            if (this->move_state.test (move_sense::rot_roll_left)) { out -= angular_speed; }
-            if (this->move_state.test (move_sense::rot_roll_right)) { out += angular_speed; }
+            if (this->move_state.test (move_sense::rot_roll_left)) { out -= kcmd_angular_speed; }
+            if (this->move_state.test (move_sense::rot_roll_right)) { out += kcmd_angular_speed; }
             return out;
         }
 
@@ -1265,11 +1336,11 @@ export namespace craysim
                     this->vstate.reset (state::paused);
                     this->move_state.set (move_sense::rot_roll_right);
                 } else if (key == mplot::key::end) {
-                    this->speed = this->speed * 0.5f;
-                    std::cout << "Speed reduced to " << this->speed  << "m/s" << std::endl;
+                    this->kcmd_speed = this->kcmd_speed * 0.5f;
+                    std::cout << "Speed reduced to " << this->kcmd_speed  << "m/s" << std::endl;
                 } else if (key == mplot::key::home) {
-                    this->speed = this->speed * 2.0f;
-                    std::cout << "Speed increased to " << this->speed  << "m/s" << std::endl;
+                    this->kcmd_speed = this->kcmd_speed * 2.0f;
+                    std::cout << "Speed increased to " << this->kcmd_speed  << "m/s" << std::endl;
                 } else if (key == mplot::key::r) {
                     this->stop();
                     this->vstate.set (state::campose_reset_request);
@@ -1314,19 +1385,9 @@ export namespace craysim
                     this->vstate.flip (state::walk);
                 } else if (key == mplot::key::c) {
                     this->vstate.flip (state::show_camframe);
-                } else if (key == mplot::key::i) {
-                    // Increase manual disc size
-                    if (this->manual_cone_length < 0.0f) {
-                        this->manual_cone_length = 0.001f;
-                    } else {
-                        this->manual_cone_length *= 2.0f;
-                    }
                 } else if (key == mplot::key::o) {
-                    // Decrease manual disc sizne
-                    if (this->manual_cone_length >= 0.0f) {
-                        this->manual_cone_length *= 0.5f;
-                    }
-
+                    std::cout << "Flip homing\n";
+                    this->sim_opts.flip (craysim::options::homing_mode);
                 } else if (key == mplot::key::escape) {
                     this->stop();
 
