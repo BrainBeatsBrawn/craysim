@@ -22,6 +22,8 @@ export namespace craysim
     template <typename T>
     struct random_walk
     {
+        random_walk() {}
+
         random_walk (const std::uint32_t _n_steps, const std::uint32_t _a_tau)
         {
             this->n_steps = _n_steps;
@@ -34,6 +36,15 @@ export namespace craysim
             this->n_steps = _n_steps;
             this->a_tau = _a_tau;
             this->kappa = _kappa;
+            this->init();
+        }
+
+        random_walk (const std::uint32_t _n_steps, const std::uint32_t _a_tau, const T& _kappa, const T& acc_max)
+        {
+            this->n_steps = _n_steps;
+            this->a_tau = _a_tau;
+            this->kappa = _kappa;
+            this->amm.max = acc_max;
             this->init();
         }
 
@@ -95,7 +106,7 @@ export namespace craysim
         T kappa = T{100};                   // Von Mises concentration parameter
         sm::vvec<T> a = {};                 // Acceleration values
         // Uniform RNG range outbound [0, 0.05]
-        const sm::range<T> amm = { T{0}, T{0.005} };
+        sm::range<T> amm = { T{0}, T{0.005} };
         // how often does the acceleration change?
         std::uint32_t a_tau = 50;
 
