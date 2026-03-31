@@ -57,52 +57,66 @@ export namespace craysim
         blender_axes,     // Set true to transform glTF into Blender's z-up axes
         max_fps,          // If true, poll, instead of fps
         path_from_csv,    // Move the agent from a pre-defined sequence of 2D coordinates that give it a path
+        have_json_config, // user passed a json config file
         save_hdf5,        // If true, then save any output data in HDF5 (active in 'path_from_csv' mode)
         debug_mv,         // Open a debug h5 file (craysim.h5) and run compute_mesh_movement once for debug of NavMesh
         can_exit          // If set, program can exit now
     };
 
-    // Parse cmd line to find the path and set options. Return filepath of main scene gltf file and any csv path
-    std::tuple<std::string, std::string, std::string, std::string>
-    parse_inputs (std::int32_t argc, char* argv[], sm::flags<craysim::options>& opts)
+    // craysim::parse_inputs returns this struct
+    struct parsed_inputs
     {
-        std::string path = "";
-        std::string csvpath = "";
-        std::string hovh = "";
+        sm::flags<craysim::options> opts;
+        std::string gltf_path = {};
+        std::string config_path = {};
+        std::string csv_path = {};
+        std::string h5_path = {};
+        std::string hovh = {};
+    };
+
+    // Parse cmd line to find the path and set options. Return filepath of main scene gltf file and any csv path
+    parsed_inputs parse_inputs (std::int32_t argc, char* argv[])
+    {
+        parsed_inputs rtn;
+
         for (std::int32_t i = 0; i < argc; i++) {
             std::string arg = std::string(argv[i]);
             if (arg == "-h") {
                 craysim::print_help (argv[0]);
-                opts |= craysim::options::can_exit;
+                rtn.opts |= craysim::options::can_exit;
             } else if (arg == "-f") {
-                path = std::string(argv[++i]);
+                rtn.gltf_path = std::string(argv[++i]);
             } else if (arg == "-b") {
-                opts |= craysim::options::blender_axes;
+                rtn.opts |= craysim::options::blender_axes;
             } else if (arg == "-x") {
-                opts |= craysim::options::max_fps;
+                rtn.opts |= craysim::options::max_fps;
             } else if (arg == "-c") {
-                opts |= craysim::options::path_from_csv;
+                rtn.opts |= craysim::options::path_from_csv;
                 i++;
-                csvpath = std::string(argv[i]);
+                rtn.csv_path = std::string(argv[i]);
+            } else if (arg == "-j") {
+                rtn.opts |= craysim::options::have_json_config;
+                i++;
+                rtn.config_path = std::string(argv[i]);
             } else if (arg == "-d") {
-                opts |= craysim::options::save_hdf5;
+                rtn.opts |= craysim::options::save_hdf5;
             } else if (arg == "-g") {
-                opts |= craysim::options::debug_mv;
+                rtn.opts |= craysim::options::debug_mv;
             } else if (arg == "-H") {
-                hovh = std::string(argv[++i]);
+                rtn.hovh = std::string(argv[++i]);
             }
         }
-        if (path.empty()) {
+        if (rtn.gltf_path.empty()) {
             craysim::print_help (argv[0]);
-            opts |= craysim::options::can_exit;
+            rtn.opts |= craysim::options::can_exit;
         }
 
-        std::string h5_path = csvpath;
-        mplot::tools::stripFileSuffix (h5_path);
-        if (h5_path.empty()) { h5_path = "trail"; }
-        h5_path += ".h5";
+        rtn.h5_path = rtn.csv_path;
+        mplot::tools::stripFileSuffix (rtn.h5_path);
+        if (rtn.h5_path.empty()) { rtn.h5_path = "trail"; }
+        rtn.h5_path += ".h5";
 
-        return {path, csvpath, h5_path, hovh};
+        return rtn;
     }
 
     // For a given samples per omm, return a sensible number of loops over which to average fps, so
@@ -175,10 +189,10 @@ export namespace craysim
         // When the program starts, how many samples per ommatidium/element do you want?
         static constexpr std::int32_t samples_per_omm_default = 64;
 
-        visual (int width, int height, const std::string& title, const std::string& gltfpath, const std::string& h5path, sm::flags<craysim::options>& opts)
+        visual (std::int32_t width, std::int32_t height, const std::string& title, craysim::parsed_inputs& prog_opts)
             : mplot::Visual<glver> (width, height, title)
         {
-            this->sim_opts = opts;
+            this->sim_opts = prog_opts.opts;
 
             // Boilerplate memory alloc for compound-ray and turn off verbose logging.
             multicamAlloc(); setVerbosity (false);
@@ -208,7 +222,7 @@ export namespace craysim
             // We follow the agent as it moves by default.
             this->options.set (mplot::visual_options::viewFollowsVMTranslations);
 
-            this->load (gltfpath);
+            this->load (prog_opts.gltf_path);
             // Use a FPS profiling with a text object on screen
             this->addLabel ("0 FPS", {0.63f, -0.43f, 0.0f}, this->fps_label);
             this->setup_camera();
@@ -217,7 +231,7 @@ export namespace craysim
             this->setup_breadcrumbs();
             this->setup_agent_coords();
 
-            this->record.init (h5path, std::ios::out | std::ios::trunc);
+            this->record.init (prog_opts.h5_path, std::ios::out | std::ios::trunc);
         }
 
         ~visual()
@@ -330,9 +344,9 @@ export namespace craysim
             this->agent_coords->setViewMatrix (this->initial_camera_space);
         }
 
-        void setup_random_walk (const std::uint32_t _n_steps = 1500, const std::uint32_t _a_tau = 150, const float _kappa = 100)
+        void setup_random_walk (const std::uint32_t _n_steps = 1500, const std::uint32_t _a_tau = 150, const float _kappa = 100, const float _a_max = 100)
         {
-            this->rrg = std::make_unique<craysim::random_walk<float>>(_n_steps, _a_tau, _kappa);
+            this->rrg = std::make_unique<craysim::random_walk<float>>(_n_steps, _a_tau, _kappa, _a_max);
         }
 
         void add_breadcrumb (const sm::vec<>& bc_location)
