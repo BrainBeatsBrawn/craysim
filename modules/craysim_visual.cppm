@@ -956,9 +956,10 @@ export namespace craysim
                         // no more movements, so switch off path_from_csv mode
                         this->sim_opts.set (craysim::options::path_from_csv, false);
                     }
-                } else if (this->sim_opts.test (craysim::options::api_movement)) {
+                } else if (this->sim_opts.any_of ({craysim::options::api_movement, craysim::options::homing_mode})) {
                     // React to movements commanded by vec/quaternion or transformation matrix
                     // (i.e. by client code).
+                    this->api_move_over_land();
                 } else {
                     this->key_move_over_land (this->fps_profiler.fps_mean);
                 }
