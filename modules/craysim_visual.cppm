@@ -484,6 +484,8 @@ export namespace craysim
         // Detect changes in the compound-ray camera, and update all our EyeVisuals accordingly
         void detect_camera_changes (std::vector<mplot::compoundray::EyeVisual<glver>*>& other_eyes)
         {
+            if (this->eye == nullptr) { return; }
+
             std::size_t curr_eye_size = this->last_eye_size;
             // Detect changes in the camera and update eye model as necessary
             if (this->ommatidia_data.size() == 0) {
@@ -644,10 +646,8 @@ export namespace craysim
 
             this->add_breadcrumb (lastloc);
 
-            this->eye->setViewMatrix (cam_to_scene);
-            if (this->agent_body != nullptr) {
-                this->agent_body->setViewMatrix (cam_to_scene);
-            }
+            if (this->eye != nullptr) { this->eye->setViewMatrix (cam_to_scene); }
+            if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
             this->agent_coords->setViewMatrix (cam_to_scene);
         }
 
@@ -718,10 +718,8 @@ export namespace craysim
             }
             this->check_reset_camspace (cam_to_scene); // if requested
             // Update the view matrix of eye and eye localspace axes
-            this->eye->setViewMatrix (cam_to_scene);
-            if (this->agent_body != nullptr) {
-                this->agent_body->setViewMatrix (cam_to_scene);
-            }
+            if (this->eye != nullptr) { this->eye->setViewMatrix (cam_to_scene); }
+            if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
             this->agent_coords->setViewMatrix (cam_to_scene);
         }
 
@@ -783,8 +781,8 @@ export namespace craysim
             setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
             this->check_reset_camspace (cam_to_scene); // if requested
             // Update the view matrix of eye and eye localspace axes
-            this->eye->setViewMatrix (cam_to_scene);
-            this->agent_body->setViewMatrix (cam_to_scene);
+            if (this->eye != nullptr) { this->eye->setViewMatrix (cam_to_scene); }
+            if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
             this->agent_coords->setViewMatrix (cam_to_scene);
         }
 
@@ -852,8 +850,8 @@ export namespace craysim
 
             this->check_reset_camspace (cam_to_scene); // if requested
             // Update the view matrix of eye and eye localspace axes
-            this->eye->setViewMatrix (cam_to_scene);
-            this->agent_body->setViewMatrix (cam_to_scene);
+            if (this->eye != nullptr) { this->eye->setViewMatrix (cam_to_scene); }
+            if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
             this->agent_coords->setViewMatrix (cam_to_scene);
 
             return rtn;
@@ -880,8 +878,8 @@ export namespace craysim
             dsv.read_val ("/tm1_ti0", this->tm1_ti0);
 
             setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (this->tm1_cam_to_scene));
-            this->eye->setViewMatrix (this->tm1_cam_to_scene);
-            this->agent_body->setViewMatrix (this->tm1_cam_to_scene);
+            if (this->eye != nullptr) { this->eye->setViewMatrix (this->tm1_cam_to_scene); }
+            if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (this->tm1_cam_to_scene); }
             this->agent_coords->setViewMatrix (this->tm1_cam_to_scene);
             std::cout << "First compute_mesh_movement from saved data:\n";
             this->land->navmesh->ti0 = this->tm1_ti0;
@@ -894,8 +892,8 @@ export namespace craysim
             std::cout << "compute_mesh_movement for time t returned!\n";
             // Set the new position for camera and ant models
             setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (_cam_to_scene));
-            this->eye->setViewMatrix (_cam_to_scene);
-            this->agent_body->setViewMatrix (_cam_to_scene);
+            if (this->eye != nullptr) { this->eye->setViewMatrix (_cam_to_scene); }
+            if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (_cam_to_scene); }
             this->agent_coords->setViewMatrix (_cam_to_scene);
         }
 
