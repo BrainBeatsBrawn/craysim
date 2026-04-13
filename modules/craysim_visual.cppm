@@ -13,8 +13,6 @@ module;
 // scene exists at global scope in libEyeRenderer.so
 extern MulticamScene* scene;
 
-#include <mplot/keys.h>
-
 export module craysim.visual;
 
 import sm.mathconst;
