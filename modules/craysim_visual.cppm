@@ -228,7 +228,7 @@ export namespace craysim
             this->setup_camera();
             this->setup_oces();
             this->setup_eyevisual();
-            this->setup_breadcrumbs();
+            this->setup_breadcrumbs (1000u); // default 1000 breadcrumbs
             this->setup_agent_coords();
 
             this->record.init (prog_opts.h5_path, std::ios::out | std::ios::trunc);
@@ -317,9 +317,19 @@ export namespace craysim
             this->setFollowedVM (this->eye);
         }
 
-        // Breadcrumb trail
-        void setup_breadcrumbs()
+        // Breadcrumb trail for max_bc breadcrumbs. Called at start of program, can be re-called
+        void setup_breadcrumbs (std::uint64_t max_bc)
         {
+            if (this->isvp != nullptr) {
+                // check max_bc same as max_instances
+                if (max_bc == isvp->max_instances) {
+                    // Nothing to do
+                    return;
+                }
+                // Remove existing
+                this->removeVisualModel (this->isvp);
+                this->isvp = nullptr;
+            }
             auto isv = std::make_unique<mplot::InstancedScatterVisual<glver>> (sm::vec<>{});
             isv->set_parent (this->get_id());
             isv->max_instances = max_bc;
@@ -351,12 +361,14 @@ export namespace craysim
 
         void add_breadcrumb (const sm::vec<>& bc_location)
         {
+            if (this->isvp == nullptr) { return; }
+
             ++this->move_counter;
-            if (this->breadcrumb_coords.size() < this->max_bc) {
+            if (this->breadcrumb_coords.size() < this->isvp->max_instances) {
                 this->breadcrumb_coords.push_back (bc_location);
                 this->breadcrumb_data.push_back (0.0f); // dummy for now
             } else {
-                this->breadcrumb_coords[move_counter % max_bc] = bc_location;
+                this->breadcrumb_coords[move_counter % this->isvp->max_instances] = bc_location;
                 // breadcrumb_data.push_back (0.0f); // dummy for now, to be flags.
             }
             if (this->bc_clr.empty() || this->bc_alpha.empty() || this->bc_scale.empty()) {
@@ -1132,8 +1144,6 @@ export namespace craysim
         std::uint64_t render_counter = 0u;
         // State for breadcrumb trail. A move counter
         std::uint64_t move_counter = 0u;
-        // A maximum number of breadcrumbs to show
-        std::uint64_t max_bc = 1000;
         // Container for breadcrumb locations
         sm::vvec<sm::vec<float, 3>> breadcrumb_coords = {};
         // Container for breadcrumb data (size, colour, alpha, etc)
