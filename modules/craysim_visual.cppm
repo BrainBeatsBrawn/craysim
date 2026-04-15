@@ -921,6 +921,9 @@ export namespace craysim
         // How many fast renders to wait until we re-render the slow windows?
         std::uint64_t slow_every = 10u;
 
+        // Time const for frames.
+        double frame_tau = 0.0167;
+
         // Call this from your main loop. Returns true if slow windows were processed
         bool render_and_poll ()
         {
@@ -935,7 +938,7 @@ export namespace craysim
             if (this->move_counter % 100 == 0) { this->fps_label_update(); }
 
             // Save some electricity while developing - limit to 60 FPS. For max speed use this->poll() (-x)
-            if (this->sim_opts.test (craysim::options::max_fps)) { this->poll(); } else { this->wait (0.0167); }
+            if (this->sim_opts.test (craysim::options::max_fps)) { this->poll(); } else { this->wait (this->frame_tau); }
 
             // Render the other windows
             if ((this->render_counter % this->slow_every) == 0u) {
