@@ -805,7 +805,7 @@ export namespace craysim
             if (this->csv_positions.size() > this->move_counter) {
                 /*
                  * With a csv path, teleport between each location (and then estimate the heading of
-                 * the ant). CSV positions are relative to the landscape model.
+                 * the ant, or use csv_dirns). CSV positions are relative to the landscape model.
                  */
                 sm::vec<float> lastcamloc = cam_to_scene.translation();
 
@@ -833,25 +833,35 @@ export namespace craysim
                 //std::cout << "--> Got hp_scene: " << hp_scene << std::endl;
 
                 if (_ti0 != std::numeric_limits<std::uint32_t>::max()) {
-                    sm::vec<float> fwds = nextloc - lastloc;
+
+                    sm::vec<float> fwds;
+                    if (!this->csv_dirns.empty()) {
+                        // Prolly a bit hacky. Does not take account of this->scene_up.
+                        fwds = { this->csv_dirns[this->move_counter][0], 0.0f, this->csv_dirns[this->move_counter][1] };
+                    } else {
+                        fwds = nextloc - lastloc;
+                    }
+
                     // Set up our camera using the data obtained from find_triangle_hit()
                     cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight, fwds);
                     if (cam_to_scene != sm::mat<float, 4>::identity()) {
                         setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
-                    } // else what to do if cam_to_scene is identity?
+                    } else { std::cout << "cam_to_scene is identity?!\n"; }
+                    // else what to do if cam_to_scene is identity?
 
                     // Now we have moved, can compute instantaneous velocity
                     this->instantaneous_velocity = cam_to_scene.translation() - lastcamloc;
+                    std::cout << "instant vel: " << this->instantaneous_velocity << std::endl;
+                    std::cout << " cam_to_scene.translation() = " << cam_to_scene.translation() << std::endl;
 
                 } else {
                     // Rather than throwing, could just move on to next in csv?
-                    // throw std::runtime_error ("Failed to find the landscape so can't teleport to that location!?!");
                     cam_to_scene = mplot::compoundray::getCameraSpace (scene);
                     std::cout << "Omit csv_positions[this->move_counter] = csv_positions[" << this->move_counter << "] = "
                               << this->csv_positions[this->move_counter] << " (failed to find triangle hit)\n";
                 }
 
-                this->add_breadcrumb (lastcamloc);
+                this->add_breadcrumb (lastcamloc); // increments move_counter
 
             } else {
                 // else no more movements, so switch off path_from_csv mode
@@ -1162,8 +1172,10 @@ export namespace craysim
         mplot::VisualModel<glver>* land = nullptr;
         // land's viewmatrix. converts land model to scene
         sm::mat<float, 4> land_to_scene;
-        // We can load data from a csv file for pre-defined paths
+        // We can load data from a csv file for pre-defined paths. Client code populates these.
         sm::vvec<sm::vec<float, 2>> csv_positions;
+        sm::vvec<sm::vec<float, 2>> csv_dirns;
+        sm::vvec<std::uint32_t> csv_flags;
         // Home/nest locations. Client code can populate this and make use of it in any way that is useful.
         sm::vvec<sm::vec<float>> home_locations;
         // It may be useful to define some target locations, too.
