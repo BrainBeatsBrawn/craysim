@@ -813,16 +813,26 @@ export namespace craysim
                 sm::vec<float> lastloc = { this->csv_positions[this->move_counter - 1][0], 0, this->csv_positions[this->move_counter - 1][1] };
                 //std::cout << "Teleport a distance " << (lastloc - nextloc).length() << std::endl;
 
-                sm::vec<float> ltstr = this->land_to_scene.translation(); // always the same
-                sm::vec<float> cam_nextloc = nextloc;
-                cam_nextloc[0] += ltstr[0];
-                cam_nextloc[2] += ltstr[2]; // update only x and z
-                //std::cout << "--> cam_nextloc: " << cam_nextloc << std::endl;
+                sm::vec<float> fwds;
+                if (!this->csv_dirns.empty()) {
+                    // Prolly a bit hacky. Does not take account of this->scene_up.
+                    fwds = { this->csv_dirns[this->move_counter][0], 0.0f, this->csv_dirns[this->move_counter][1] };
+                } else {
+                    fwds = nextloc - lastloc;
+                }
 
-                sm::mat<float, 4> cnl;
-                cnl.translate (cam_nextloc);
-                setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cnl));
-                cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+                if (fwds.length() > 0.0f) {
+                    sm::vec<float> ltstr = this->land_to_scene.translation(); // always the same
+                    sm::vec<float> cam_nextloc = nextloc;
+                    cam_nextloc[0] += ltstr[0];
+                    cam_nextloc[2] += ltstr[2]; // update only x and z
+                    //std::cout << "--> cam_nextloc: " << cam_nextloc << std::endl;
+
+                    sm::mat<float, 4> cnl;
+                    cnl.translate (cam_nextloc);
+                    setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cnl));
+                    cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+                }
 
                 // Find triangle hits using the scene's 'up' direction.
                 sm::vec<float> camloc_mf = (this->land_to_scene.inverse() * cam_to_scene).translation();
@@ -834,16 +844,12 @@ export namespace craysim
 
                 if (_ti0 != std::numeric_limits<std::uint32_t>::max()) {
 
-                    sm::vec<float> fwds;
-                    if (!this->csv_dirns.empty()) {
-                        // Prolly a bit hacky. Does not take account of this->scene_up.
-                        fwds = { this->csv_dirns[this->move_counter][0], 0.0f, this->csv_dirns[this->move_counter][1] };
-                    } else {
-                        fwds = nextloc - lastloc;
-                    }
-
                     // Set up our camera using the data obtained from find_triangle_hit()
-                    cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight, fwds);
+                    if (fwds.length() > 0.0f) {
+                        cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight, fwds);
+                    } // else agent position has not changed from the last time.
+
+
                     if (cam_to_scene != sm::mat<float, 4>::identity()) {
                         setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
                     } else { std::cout << "cam_to_scene is identity?!\n"; }
@@ -851,8 +857,9 @@ export namespace craysim
 
                     // Now we have moved, can compute instantaneous velocity
                     this->instantaneous_velocity = cam_to_scene.translation() - lastcamloc;
-                    std::cout << "instant vel: " << this->instantaneous_velocity << std::endl;
-                    std::cout << " cam_to_scene.translation() = " << cam_to_scene.translation() << std::endl;
+                    //std::cout << "instant vel: " << this->instantaneous_velocity
+                    //          << "   cam_to_scene fwds = "
+                    //          << (cam_to_scene * sm::vec<>::uz()) << std::endl;
 
                 } else {
                     // Rather than throwing, could just move on to next in csv?
@@ -1004,7 +1011,7 @@ export namespace craysim
             }
 
             // Scale size of breadcrumbs based on distance
-            float iscl = 2.0f * std::log (1.0f + this->get_d_to_rotation_centre());
+            float iscl = 1.0f * std::log (1.0f + this->get_d_to_rotation_centre());
             this->isvp->set_instance_scale (iscl);
 
             return (this->render_counter % this->slow_every) == 0u;
