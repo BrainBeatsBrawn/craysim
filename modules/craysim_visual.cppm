@@ -7,9 +7,10 @@ module;
 #include <array>
 #include <memory>
 #include <span>
+#include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
-#include <mplotext/healpix/doublepix.h>
 #include <cylindrical_from_fourpi_indices.hpp>
 
 #include <MulticamScene.h>
@@ -43,7 +44,6 @@ export import oces.reader;
 
 import craysim.random_walk;
 
-#include "../../../optpov_ommatidia_builder.cpp"
 
 // Reproduce controller functions for the mplot window for ease of use
 export namespace craysim
@@ -237,7 +237,7 @@ export namespace craysim
             this->setup_eyevisual();
             this->setup_breadcrumbs (1000u); // default 1000 breadcrumbs
             this->setup_agent_coords();
-            this->setup_ego_heading_axes();
+            this->setup_compass_coords();
 
             this->record.init (prog_opts.h5_path, std::ios::out | std::ios::trunc);
         }
@@ -362,17 +362,17 @@ export namespace craysim
             this->agent_coords->setViewMatrix (this->initial_camera_space);
         }
 
-        void setup_ego_heading_axes()
+        void setup_compass_coords()
         {
-            auto ego_axes = std::make_unique<mplot::CoordArrows<glver>> (sm::vec<float>{0.0f});
-            ego_axes->set_parent (this->get_id());
-            ego_axes->em = 0.0f;
-            ego_axes->lengths = {1.5f, 1.5f, 1.5f};
-            ego_axes->thickness = 0.3f;
-            ego_axes->finalize();
-            this->ego_heading_axes = this->addVisualModel (ego_axes);
-            this->ego_heading_axes->name = "ego_heading";
-            this->ego_heading_axes->setViewMatrix (this->compute_ego_heading (this->get_camera_pose()));
+            auto compass_coords_up = std::make_unique<mplot::CoordArrows<glver>> (sm::vec<float>{0.0f});
+            compass_coords_up->set_parent (this->get_id());
+            compass_coords_up->em = 0.0f;
+            compass_coords_up->lengths = {1.5f, 1.5f, 1.5f};
+            compass_coords_up->thickness = 0.3f;
+            compass_coords_up->finalize();
+            this->compass_coords = this->addVisualModel (compass_coords_up);
+            this->compass_coords->name = "Compass";
+            this->compass_coords->setViewMatrix (this->get_compass_matrix());
         }
 
         void setup_random_walk (const std::uint32_t _n_steps = 1500, const std::uint32_t _a_tau = 150, const float _kappa = 100, const float _a_max = 100)
@@ -542,6 +542,64 @@ export namespace craysim
             }
         }
 
+        // Has the camera rotated since the last ime step? Returns true if rotation in any plane is greater than the threshold.
+        bool camera_has_rotated (float rotation_threshold_rad = 0.01745f) // default threshold of ~1 degree
+        {
+            sm::mat<float, 4> curr_cam_to_scene = mplot::compoundray::getCameraSpace(scene);
+            
+            // If this is the first call, just store and return false
+            if (std::isnan (this->tm1_cam_to_scene.arr[0])) {
+                this->tm1_cam_to_scene = curr_cam_to_scene;
+                return false;
+            }
+            
+            // Extract the 3x3 rotation parts from both matrices
+            sm::mat<float, 3, 3> curr_rot = curr_cam_to_scene.linear();
+            sm::mat<float, 3, 3> prev_rot = this->tm1_cam_to_scene.linear();
+            
+            // Compute relative rotation: delta = prev^T * curr
+            sm::mat<float, 3, 3> delta_rot = prev_rot.transpose() * curr_rot;
+            
+            // Extract Euler angles (pitch, roll, yaw) from the relative rotation matrix
+            // Pitch (rotation around x-axis)
+            float pitch = std::atan2 (delta_rot(2, 1), delta_rot(2, 2));
+            
+            // Roll (rotation around y-axis) - with clipping to avoid asin domain issues
+            float roll_arg = std::clamp (-delta_rot(2, 0), -1.0f, 1.0f);
+            float roll = std::asin (roll_arg);
+            
+            // Yaw (rotation around z-axis)
+            float yaw = std::atan2 (delta_rot(1, 0), delta_rot(0, 0));
+            
+            // Find the largest rotation angle
+            float max_rotation = std::max({std::abs(pitch), std::abs(roll), std::abs(yaw)});
+            
+            // Update stored frame for next call
+            this->tm1_cam_to_scene = curr_cam_to_scene;
+
+            std::cout << "Camera rotation since last check: pitch=" << pitch * mc::rad2deg << " deg, roll=" << roll * mc::rad2deg << " deg, yaw=" << yaw * mc::rad2deg << " deg. Max rotation = " << max_rotation * mc::rad2deg << " deg\n";
+                        
+            return max_rotation > rotation_threshold_rad;
+        }
+
+        sm::mat<float, 4> get_compass_matrix ()
+        {
+            // Project camera forward (z-axis) onto the y=0 ground plane to get heading direction
+            sm::mat<float,4> cam_to_scene = mplot::compoundray::getCameraSpace(scene);
+            // Vector pointing in the camera's forward direction, defined as the z direction in the camera's frame
+            sm::vec<float> cam_z = cam_to_scene.col(2).less_one_dim();
+            cam_z.renormalize();
+            // Project the camera downward onto the ground plane (normal to the ground plane is the "up" direction) to get the forward direction of the agent's heading.
+            sm::vec<float> fwd = sm::geometry::vector_plane_projection (this->scene_up, cam_z);
+            fwd.renormalize();
+
+            sm::mat<float, 4> compass_matrix;
+            compass_matrix.frombasis_inplace (this->scene_up.cross (fwd), this->scene_up, fwd);
+            compass_matrix.pretranslate (cam_to_scene.translation());
+
+            return compass_matrix;
+        }
+
         // Obtain the current heading of the camera, with respect to the world/scene axes, where
         // Visual::scene_right is North and Visual::scene_out is East.
         // Return result in radians in range [0 2pi], with 0=N, pi/2=E, pi=S, 3pi/2=W.
@@ -684,70 +742,13 @@ export namespace craysim
             this->agent_coords->setViewMatrix (cam_to_scene);
         }
 
-        // Alex addition
-        float unwrap_angle_near (const float previous_unwrapped, const float current_wrapped)
-        {
-            const float two_pi = sm::mathconst<float>::two_pi;
-            const float previous_wrapped = std::remainder(previous_unwrapped, two_pi);
-            const float delta = std::remainder(current_wrapped - previous_wrapped, two_pi);
-            return previous_unwrapped + delta;
-        }
-
-        float compute_heading_angle_global (const sm::mat<float,4>& ego_heading) const
-        {
-            const sm::vec<float,3> ego_z = ego_heading.linear().col(2);
-            const float xz_norm = std::sqrt((ego_z[0] * ego_z[0]) + (ego_z[2] * ego_z[2]));
-            if (xz_norm <= 1e-6f) { return 0.0f; }
-
-            // Signed angle in the global x-z plane, from global +X to ego-heading +Z.
-            // Leftward yaw is negative, rightward yaw is positive.
-            const float heading_angle_global = -std::atan2(ego_z[2], ego_z[0]);
-            
-            return heading_angle_global;
-        }
-
-        // Alex addition
-        void update_heading_angle_global (const sm::mat<float,4>& ego_heading)
-        {
-            const float current_wrapped = compute_heading_angle_global (ego_heading);
-            if (!this->heading_angle_global_initialized) {
-                this->heading_angle_global = current_wrapped;
-                this->heading_angle_global_initialized = true;
-                return;
-            }
-
-            this->heading_angle_global = unwrap_angle_near (this->heading_angle_global, current_wrapped);
-        }
-
-        sm::mat<float,4> compute_ego_heading (const sm::mat<float,4>& camera_frame)
-        {
-            sm::mat<float,4> heading = camera_frame;
-
-            // Rotate about local z so local x lies in the global x-z plane.
-            float x_axis_global_y = heading.linear().col(0)[1];
-            float y_axis_global_y = heading.linear().col(1)[1];
-            float yaw_about_local_z = std::atan2 (-x_axis_global_y, y_axis_global_y);
-            sm::mat<float,4> z_axis_rot;
-            z_axis_rot.prerotate (sm::vec<float>::uz(), yaw_about_local_z);
-            heading *= z_axis_rot;
-
-            // Rotate about local x so local y aligns with global y.
-            y_axis_global_y = heading.linear().col(1)[1];
-            float z_axis_global_y = heading.linear().col(2)[1];
-            float pitch_about_local_x = std::atan2 (z_axis_global_y, y_axis_global_y);
-            sm::mat<float,4> x_axis_rot;
-            x_axis_rot.prerotate (sm::vec<float>::ux(), pitch_about_local_x);
-
-            return heading * x_axis_rot;
-        }
-
         // Make a keyboard based movement over the landscape
         void key_move_over_land (const float fps)
         {
             if (isCompoundEyeActive()) { this->ommatidia = &scene->m_ommVecs[scene->getCameraIndex()]; }
 
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
-            sm::mat<float, 4> ego_heading = compute_ego_heading (cam_to_scene);
+            sm::mat<float, 4> compass_matrix = get_compass_matrix();
 
             if (this->is_actively_rotating()) {
                 // Up-down (pitch) is rotation about local camera frame axis x
@@ -759,24 +760,26 @@ export namespace craysim
 
                 cam_to_scene = mplot::compoundray::getCameraSpace (scene); // update
                 
-                sm::vec<float,2> fovea_angle = {0.0f, 0.0f};
-                float baseline = 0.125f;
-                int n_side_fov = 100;
-                if (craysim::stabilise_and_commit (
-                        ommatidia,
-                        cam_to_scene,
-                        ego_heading,
-                        fovea_angle,
-                        baseline,
-                        n_side_fov,
-                        this->last_stabilise_cam_to_scene,
-                        this->last_stabilise_cam_to_scene_initialized)) {
-                    this->ommatidia_geometry_dirty = true;
-                }
+                // sm::vec<float,2> fovea_angle = {0.0f, 0.0f};
+                // float baseline = 0.125f;
+                // int n_side_fov = 100;
+                // if (craysim::stabilise_and_commit (
+                //         ommatidia,
+                //         cam_to_scene,
+                //         compass_matrix,
+                //         fovea_angle,
+                //         baseline,
+                //         n_side_fov,
+                //         this->last_stabilise_cam_to_scene, // Reasonable to keep a last_cam_to_scene around in this class
+                //         this->last_stabilise_cam_to_scene_initialized // TODO make an sm::flag. Add to one of the existing ones
+                //     )) {
+                //     this->ommatidia_geometry_dirty = true;
+                // }
+
+
+                
                 // Move the camera to the new position
                 setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
-                ego_heading = compute_ego_heading (cam_to_scene);
-                update_heading_angle_global (ego_heading);
             }
 
             if (this->is_actively_translating()) {
@@ -827,30 +830,14 @@ export namespace craysim
                     }
                 }
 
-                setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
-
-                sm::vec<float,2> fovea_angle = {0.0f, 0.0f};
-                float baseline = 0.125f;
-                int n_side_fov = 100;
-                if (craysim::stabilise_and_commit (
-                        ommatidia,
-                        cam_to_scene,
-                        ego_heading,
-                        fovea_angle,
-                        baseline,
-                        n_side_fov,
-                        this->last_stabilise_cam_to_scene,
-                        this->last_stabilise_cam_to_scene_initialized)) {
-                    this->ommatidia_geometry_dirty = true;
-                }
                 // Move the camera to the new position
                 setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
-                ego_heading = compute_ego_heading (cam_to_scene);
-                update_heading_angle_global (ego_heading);
+                compass_matrix = get_compass_matrix();
 
                 // Add a breadcrumb at the previous location
                 this->add_breadcrumb (lastloc);
             }
+
             this->check_reset_camspace (cam_to_scene); // if requested
             // Update the view matrix of eye and eye localspace axes
             if (this->eye != nullptr) { this->eye->setViewMatrix (cam_to_scene); }
@@ -1036,7 +1023,6 @@ export namespace craysim
         {
             this->fps_profiler.at_begin (craysim::best_n_samples (getCurrentEyeSamplesPerOmmatidium()));
         }
-
         void end_loop_timer() { this->fps_profiler.at_end(); }
 
         // Allows client code to set up other windows etc
@@ -1079,8 +1065,8 @@ export namespace craysim
             this->instantaneous_velocity = {}; // velocity computed per render cycle
 
             this->agent_coords->setHide (!this->vstate.test(craysim::visual<glver>::state::show_camframe));
-            if (this->ego_heading_axes != nullptr) {
-                this->ego_heading_axes->setHide (!this->vstate.test(craysim::visual<glver>::state::show_ego_heading));
+            if (this->compass_coords != nullptr) {
+                this->compass_coords->setHide (!this->vstate.test(craysim::visual<glver>::state::show_compass));
             }
 
             // Any of the following movement-creating functions will set the instantaneous velocity
@@ -1126,8 +1112,8 @@ export namespace craysim
             float iscl = 2.0f * std::log (1.0f + this->get_d_to_rotation_centre());
             this->isvp->set_instance_scale (iscl);
 
-            if (this->ego_heading_axes != nullptr) {
-                this->ego_heading_axes->setViewMatrix (this->compute_ego_heading (this->get_camera_pose()));
+            if (this->compass_coords != nullptr) {
+                this->compass_coords->setViewMatrix (this->get_compass_matrix());
             }
 
             return (this->render_counter % this->slow_every) == 0u;
@@ -1275,7 +1261,7 @@ export namespace craysim
         // A coordinate arrow frame to show location of compound-ray eye/agent_body (in case they are tiny)
         mplot::CoordArrows<glver>* agent_coords = nullptr;
         // A coordinate arrow frame showing the stabilised ego heading
-        mplot::CoordArrows<glver>* ego_heading_axes = nullptr;
+        mplot::CoordArrows<glver>* compass_coords = nullptr;
 
         // Visualization of a breadcrumb trail
         mplot::InstancedScatterVisual<glver>* isvp = nullptr;
@@ -1317,22 +1303,17 @@ export namespace craysim
         // Random route generation object
         std::unique_ptr<craysim::random_walk<float>> rrg;
 
-        // Continuously-unwrapped heading angle (Alex addition)
-        float heading_angle_global = 0.0f;
-        bool heading_angle_global_initialized = false;
-
-        // Track the previous cam_to_scene used in stabilise_and_commit for angle checking
-        sm::mat<float, 4> last_stabilise_cam_to_scene;
-        bool last_stabilise_cam_to_scene_initialized = false;
-
         // For debug saving and computation of instantaneous velocity
-        sm::mat<float, 4> tm1_cam_to_scene;
+        sm::mat<float, 4> tm1_cam_to_scene = [] {
+            sm::mat<float, 4> m;
+            m.arr.fill (std::numeric_limits<float>::quiet_NaN());
+            return m;
+        }();
         sm::vec<float> tm1_mv_camframe = {};
         std::uint32_t tm1_ti0 = 0u;
 
         // Recording object
         sm::hdfdata record;// (h5_path, std::ios::out | std::ios::trunc);
-
 
         // Movement state (class and bitset) (flags?)
         enum class move_sense : uint16_t {
@@ -1354,7 +1335,7 @@ export namespace craysim
             show_cones,            // Parameter for EyeVisual. Draw simple flared tubes in mathplot window
             campose_reset_request, // A request to reset the pose of the camera
             show_camframe,         // Show camera axes?
-            show_ego_heading,      // Show ego heading axes?
+            show_compass,          // Show compass axes?
             paused,                // Pause sim (i.e. pause time)?
             stepfwd,               // If true and if paused is true, step forward one timestep in the camera input
             walk,                  // If true, do a random walk
@@ -1543,7 +1524,7 @@ export namespace craysim
                 } else if (key == mplot::key::c) {
                     this->vstate.flip (state::show_camframe);
                 } else if (key == mplot::key::e) {
-                    this->vstate.flip (state::show_ego_heading);
+                    this->vstate.flip (state::show_compass);
                 } else if (key == mplot::key::o) {
                     std::cout << "Flip homing\n";
                     this->sim_opts.flip (craysim::options::homing_mode);
@@ -1580,30 +1561,9 @@ export namespace craysim
         }
     };
 
-    // Free-function form of compute_ego_heading, for use from client code (e.g. main.cpp)
-    inline sm::mat<float,4> compute_ego_heading (const sm::mat<float,4>& camera_frame)
-    {
-        sm::mat<float,4> heading = camera_frame;
-
-        float x_axis_global_y = heading.linear().col(0)[1];
-        float y_axis_global_y = heading.linear().col(1)[1];
-        float yaw_about_local_z = std::atan2 (-x_axis_global_y, y_axis_global_y);
-        sm::mat<float,4> z_axis_rot;
-        z_axis_rot.prerotate (sm::vec<float>::uz(), yaw_about_local_z);
-        heading *= z_axis_rot;
-
-        y_axis_global_y = heading.linear().col(1)[1];
-        float z_axis_global_y = heading.linear().col(2)[1];
-        float pitch_about_local_x = std::atan2 (z_axis_global_y, y_axis_global_y);
-        sm::mat<float,4> x_axis_rot;
-        x_axis_rot.prerotate (sm::vec<float>::ux(), pitch_about_local_x);
-
-        return heading * x_axis_rot;
-    }
-
     // Add a suitable 2D projection to show our ant eye (distributed with OCES) in a flat fiew
-    template <int glver>
-    void add_ant_eye_spherical_projection (craysim::visual<glver>& v, mplot::compoundray::EyeVisual<glver>* eyevm2)
+    template <int GLVersion>
+    void add_ant_eye_spherical_projection (craysim::visual<GLVersion>& v, mplot::compoundray::EyeVisual<GLVersion>* eyevm2)
     {
         // First eye of eye pair (one spherical projection)
         std::uint32_t sz = 1024;
@@ -1622,10 +1582,10 @@ export namespace craysim
         sm::vec<> twod_offset2 = { -0.0004f, 0.0007f, 0.0f }; // post scale/rotate translation
         sm::vec<> twod_shift = {0,0.0006,0};
         float rotn = -sm::mathconst<float>::pi_over_8;
-        auto ptype = mplot::compoundray::EyeVisual<glver>::projection_type::mercator;
+        auto ptype = mplot::compoundray::EyeVisual<GLVersion>::projection_type::mercator;
         if (v.oces_reader.read_success == true) {
             std::cout << "Read from oces file!!\n";
-            ptype = mplot::compoundray::EyeVisual<glver>::projection_type::equirectangular;
+            ptype = mplot::compoundray::EyeVisual<GLVersion>::projection_type::equirectangular;
             twod_tr.translate (twod_shift);
         } else {
             twod_tr.translate (twod_offset2);
