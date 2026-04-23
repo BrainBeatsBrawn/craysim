@@ -359,6 +359,14 @@ export namespace craysim
             this->rrg = std::make_unique<craysim::random_walk<float>>(_n_steps, _a_tau, _kappa, _a_max);
         }
 
+        void clear_breadcrumbs()
+        {
+            this->move_counter = 0;
+            this->breadcrumb_coords.clear();
+            this->breadcrumb_data.clear();
+            // Leave bc_clr/bc_alpha/bc_scale for now
+        }
+
         void add_breadcrumb (const sm::vec<>& bc_location)
         {
             if (this->isvp == nullptr) { return; }
@@ -422,6 +430,23 @@ export namespace craysim
             }
         }
 
+        void init_path_from_csv()
+        {
+            // Initial position comes from first entry in the csv
+            std::cout << "Set initial position from csv\n";
+            sm::vec<float> nextloc = { this->csv_positions[0][0], 0.0f, this->csv_positions[0][1] };
+            nextloc -= sm::vec<>{ 0.5f, 0.0f, 0.5f }; // don't understand this on re-reading
+            // Change camspace based on nextloc. nextloc in landscape coords, so cam_nextloc = landscape.location + nextloc;
+            sm::vec<float> ltstr = this->land_to_scene.translation();
+            sm::vec<float> cam_nextloc = nextloc;
+            cam_nextloc[0] += ltstr[0];
+            cam_nextloc[2] += ltstr[2]; // update only x and z
+            sm::mat<float, 4> cnl;
+            cnl.translate (cam_nextloc);
+            setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cnl));
+            this->move_counter = 1;
+        }
+
         void setup_landscape()
         {
             if (this->land == nullptr) { return; } // should called find_landscape() first
@@ -431,22 +456,7 @@ export namespace craysim
             sm::mat<float, 4> camspace = mplot::compoundray::getCameraSpace (scene);
 
             if (this->sim_opts.test (craysim::options::path_from_csv) && !this->csv_positions.empty()) {
-                // Initial position comes from first entry in the csv
-                std::cout << "Set initial position from csv\n";
-                sm::vec<float> nextloc = { this->csv_positions[0][0], 0.0f, this->csv_positions[0][1] };
-                nextloc -= sm::vec<>{ 0.5f, 0.0f, 0.5f }; // don't understand this on re-reading
-                std::cout << "Initial position is " << nextloc << std::endl;
-                // Change camspace based on nextloc. nextloc in landscape coords, so cam_nextloc = landscape.location + nextloc;
-                sm::vec<float> ltstr = this->land_to_scene.translation();
-                sm::vec<float> cam_nextloc = nextloc;
-                cam_nextloc[0] += ltstr[0];
-                cam_nextloc[2] += ltstr[2]; // update only x and z
-                std::cout << "cam_nextloc = land locn (" << ltstr << ") + nextloc [xz ONLY] (" << nextloc << ") = " << cam_nextloc << std::endl;
-                std::cout << "cf from-gltf camera location: " << camspace.translation() << std::endl;
-                sm::mat<float, 4> cnl;
-                cnl.translate (cam_nextloc);
-                setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cnl));
-                ++this->move_counter;
+                this->init_path_from_csv();
             }
 
             auto[hp_scene, _ti0] = this->land->navmesh->find_triangle_hit (camspace, this->land_to_scene, 100.0f);
@@ -479,6 +489,12 @@ export namespace craysim
             if (this->vstate.test (state::campose_reset_request) == true) {
                 this->stop(); // cancel any active movements
                 setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (this->initial_camera_space));
+
+                this->clear_breadcrumbs();
+                if (this->sim_opts.test (craysim::options::path_from_csv) && !this->csv_positions.empty()) {
+                    this->init_path_from_csv();
+                }
+
                 sm::mat<float, 4> camspace = mplot::compoundray::getCameraSpace (scene);
                 auto[hp_scene, _ti0] = this->land->navmesh->find_triangle_hit (camspace, this->land_to_scene);
                 cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight);
@@ -870,8 +886,7 @@ export namespace craysim
 
                 this->add_breadcrumb (lastcamloc); // increments move_counter
 
-            } else {
-                // else no more movements, so switch off path_from_csv mode
+            } else { // no more movements
                 rtn = false;
             }
 
@@ -978,12 +993,9 @@ export namespace craysim
 
                 if (this->vstate.test (craysim::visual<glver>::state::walk)) {
                     this->walk_over_land (this->fps_profiler.fps_mean);
-                } else if (this->sim_opts.test (craysim::options::path_from_csv)) {
+                } else if (this->sim_opts.test (craysim::options::path_from_csv) && this->csv_positions.size() > this->move_counter) {
                     // Construct path from csv file of 2D agent locations
-                    if (this->csv_playback (this->fps_profiler.fps_mean) == false) {
-                        // no more movements, so switch off path_from_csv mode
-                        this->sim_opts.set (craysim::options::path_from_csv, false);
-                    }
+                    this->csv_playback (this->fps_profiler.fps_mean);
                 } else if (this->sim_opts.any_of ({craysim::options::api_movement, craysim::options::homing_mode})) {
                     // React to movements commanded by vec/quaternion or transformation matrix
                     // (i.e. by client code).
