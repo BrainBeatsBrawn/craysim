@@ -4,9 +4,11 @@
 macro(setup_module_variables_for_craysim_maths base_directory)
   set(CRAYSIM_MATHS_MODULES
     ${base_directory}/sm/hdfdata.cppm
+    ${base_directory}/sm/config.cppm
   )
   set(CRAYSIM_MATHS_DOUBLEHEX_MODULES
     ${base_directory}/sm/hdfdata.cppm
+    ${base_directory}/sm/config.cppm
     ${base_directory}/sm/binomial.cppm
     ${base_directory}/sm/nm_simplex.cppm
     ${base_directory}/sm/bezcoord.cppm

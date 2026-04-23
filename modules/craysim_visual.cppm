@@ -22,6 +22,7 @@ import sm.mat;
 import sm.hdfdata;
 import sm.algo;
 import sm.geometry;
+import sm.config;
 
 import mplot.tools;
 import mplot.compoundray.interop; // mathplot <--> compoundray interoperability
@@ -57,7 +58,7 @@ export namespace craysim
         path_from_csv,    // Move the agent from a pre-defined sequence of 2D coordinates that give it a path
         api_movement,     // Client code sets a vec/quat or mat for movement in the next render_and_poll()
         homing_mode,      // A flag for a 'go home' mode. It's up to client code to decide what to do with this.
-        have_json_config, // user passed a json config file
+        have_film_director, // user passed a json config file for film direction
         save_hdf5,        // If true, then save any output data in HDF5 (active in 'path_from_csv' mode)
         debug_mv,         // Open a debug h5 file (craysim.h5) and run compute_mesh_movement once for debug of NavMesh
         can_exit          // If set, program can exit now
@@ -68,7 +69,7 @@ export namespace craysim
     {
         sm::flags<craysim::options> opts;
         std::string gltf_path = {};
-        std::string config_path = {};
+        std::string film_director_path = {};
         std::string csv_path = {};
         std::string h5_path = {};
         std::string hovh = {};
@@ -95,9 +96,9 @@ export namespace craysim
                 i++;
                 rtn.csv_path = std::string(argv[i]);
             } else if (arg == "-j") {
-                rtn.opts |= craysim::options::have_json_config;
+                rtn.opts |= craysim::options::have_film_director;
                 i++;
-                rtn.config_path = std::string(argv[i]);
+                rtn.film_director_path = std::string(argv[i]);
             } else if (arg == "-d") {
                 rtn.opts |= craysim::options::save_hdf5;
             } else if (arg == "-g") {
@@ -230,6 +231,9 @@ export namespace craysim
             this->setup_eyevisual();
             this->setup_breadcrumbs (1000u); // default 1000 breadcrumbs
             this->setup_agent_coords();
+            if (!prog_opts.film_director_path.empty()) {
+                this->setup_film_director (prog_opts.film_director_path);
+            }
 
             this->record.init (prog_opts.h5_path, std::ios::out | std::ios::trunc);
         }
@@ -352,6 +356,14 @@ export namespace craysim
             this->agent_coords = this->addVisualModel (antca);
             this->agent_coords->name = "agent";
             this->agent_coords->setViewMatrix (this->initial_camera_space);
+        }
+
+        void setup_film_director (const std::string& path)
+        {
+            this->film_director.init (path);
+            if (this->film_director.ready) {
+                // Get list of movement time points at which camera movements should be created
+            }
         }
 
         void setup_random_walk (const std::uint32_t _n_steps = 1500, const std::uint32_t _a_tau = 150, const float _kappa = 100, const float _a_max = 100)
@@ -1218,6 +1230,8 @@ export namespace craysim
         // Recording object
         sm::hdfdata record;// (h5_path, std::ios::out | std::ios::trunc);
 
+        // Defining scripted camera movements. Use a sm::config object to load a json file with a definition
+        sm::config film_director;
 
         // Movement state (class and bitset) (flags?)
         enum class move_sense : uint16_t {
