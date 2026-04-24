@@ -75,6 +75,24 @@ export namespace craysim
         std::string hovh = {};
     };
 
+    enum class direction_event : std::uint32_t
+    {
+        sceneview,
+        timed_translation,
+        timed_rotation,
+        timed_transform,  // rotation and translation together
+        unknown
+    };
+
+    struct direction_data
+    {
+        direction_event event = direction_event::unknown;
+        sm::mat<float, 4> sceneview;         // an instantaneous sceneview to move to
+        sm::vec<float, 3> translation = {};  // A translation to apply to sceneview over time transform_time
+        sm::quaternion<float> rotation; // A rotation to apply to sceneview over time transform_time
+        float transform_time = 0.0f;    // A time period for a scenview transformation
+    };
+
     // Parse cmd line to find the path and set options. Return filepath of main scene gltf file and any csv path
     parsed_inputs parse_inputs (std::int32_t argc, char* argv[])
     {
@@ -367,7 +385,17 @@ export namespace craysim
                 // Iterate though directions
                 for (auto dirn : directions) {
                     sm::config c (dirn);
-                    std::cout << "Time for this one is " << c.get<std::int32_t>("time", 0) << std::endl;
+
+                    std::uint32_t t = c.get<std::uint32_t>("event_time", 0);
+                    std::string et = c.get<std::string>("event_type", "unknown");
+
+                    if (et == "sceneview") {
+                        this->directions[t] = direction_data();
+                        this->directions[t].sceneview = c.get_vec<float, 16> ("sceneview");
+                        this->directions[t].event = direction_event::sceneview;
+                    } else {
+                        std::cout << "Unknown event type\n";
+                    }
                 }
             }
         }
@@ -837,6 +865,18 @@ export namespace craysim
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
 
             if (this->csv_positions.size() > this->move_counter) {
+
+                std::cout << "move_counter = " << move_counter << std::endl;
+                std::cout << "We have " << this->directions.size() << " directions\n";
+                if (this->directions.contains (this->move_counter)) {
+                    if (this->directions[this->move_counter].event == direction_event::sceneview) {
+                        std::cout << "Setting sceneview now\n";
+                        this->setSceneview (this->directions[this->move_counter].sceneview);
+                    } else {
+                        std::cout << "Event type is not sceneview\n";
+                    }
+                }
+
                 /*
                  * With a csv path, teleport between each location (and then estimate the heading of
                  * the ant, or use csv_dirns). CSV positions are relative to the landscape model.
@@ -1238,6 +1278,9 @@ export namespace craysim
 
         // Defining scripted camera movements. Use a sm::config object to load a json file with a definition
         sm::config film_director;
+
+        // This is populated from film_director.
+        std::map<std::uint32_t, direction_data> directions;
 
         // Movement state (class and bitset) (flags?)
         enum class move_sense : uint16_t {
