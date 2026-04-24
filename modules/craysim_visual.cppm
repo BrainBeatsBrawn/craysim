@@ -11,7 +11,6 @@ module;
 #include <cmath>
 #include <limits>
 #include <stdexcept>
-#include <cylindrical_from_fourpi_indices.hpp>
 
 #include <MulticamScene.h>
 #include <libEyeRenderer.h> // getCurrentEyeSamplesPerOmmatidium
@@ -530,7 +529,7 @@ export namespace craysim
 
             if (this->ommatidia != nullptr) {
                 curr_eye_size = this->ommatidia->size();
-                if (curr_eye_size != this->last_eye_size || this->ommatidia_geometry_dirty) {
+                if (curr_eye_size != this->last_eye_size) {
                     this->eye->reinit();
                     for (auto oe : other_eyes) { oe->reinit(); }
                     this->last_eye_size = curr_eye_size;
@@ -576,8 +575,6 @@ export namespace craysim
             
             // Update stored frame for next call
             this->tm1_cam_to_scene = curr_cam_to_scene;
-
-            std::cout << "Camera rotation since last check: pitch=" << pitch * mc::rad2deg << " deg, roll=" << roll * mc::rad2deg << " deg, yaw=" << yaw * mc::rad2deg << " deg. Max rotation = " << max_rotation * mc::rad2deg << " deg\n";
                         
             return max_rotation > rotation_threshold_rad;
         }
@@ -748,7 +745,6 @@ export namespace craysim
             if (isCompoundEyeActive()) { this->ommatidia = &scene->m_ommVecs[scene->getCameraIndex()]; }
 
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
-            sm::mat<float, 4> compass_matrix = get_compass_matrix();
 
             if (this->is_actively_rotating()) {
                 // Up-down (pitch) is rotation about local camera frame axis x
@@ -760,33 +756,15 @@ export namespace craysim
 
                 cam_to_scene = mplot::compoundray::getCameraSpace (scene); // update
                 
-                // sm::vec<float,2> fovea_angle = {0.0f, 0.0f};
-                // float baseline = 0.125f;
-                // int n_side_fov = 100;
-                // if (craysim::stabilise_and_commit (
-                //         ommatidia,
-                //         cam_to_scene,
-                //         compass_matrix,
-                //         fovea_angle,
-                //         baseline,
-                //         n_side_fov,
-                //         this->last_stabilise_cam_to_scene, // Reasonable to keep a last_cam_to_scene around in this class
-                //         this->last_stabilise_cam_to_scene_initialized // TODO make an sm::flag. Add to one of the existing ones
-                //     )) {
-                //     this->ommatidia_geometry_dirty = true;
-                // }
-
-
-                
                 // Move the camera to the new position
                 setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
             }
 
             if (this->is_actively_translating()) {
                 if (this->move_state.test (craysim::visual<glver>::move_sense::up)) {
-                    this->hoverheight += 0.05f;
+                    this->hoverheight += 0.0001f;
                 } else if (this->move_state.test (craysim::visual<glver>::move_sense::down)) {
-                    this->hoverheight -= 0.05f;
+                    this->hoverheight -= 0.0001f;
                     if (this->hoverheight < 0.0f) { this->hoverheight = 0.0f; }
                 }
                 sm::vec<float> mv_camframe = this->get_movement_vector (fps);
@@ -832,7 +810,6 @@ export namespace craysim
 
                 // Move the camera to the new position
                 setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
-                compass_matrix = get_compass_matrix();
 
                 // Add a breadcrumb at the previous location
                 this->add_breadcrumb (lastloc);
@@ -1023,6 +1000,7 @@ export namespace craysim
         {
             this->fps_profiler.at_begin (craysim::best_n_samples (getCurrentEyeSamplesPerOmmatidium()));
         }
+
         void end_loop_timer() { this->fps_profiler.at_end(); }
 
         // Allows client code to set up other windows etc
@@ -1260,7 +1238,7 @@ export namespace craysim
         mplot::VisualModel<glver>* agent_body = nullptr;
         // A coordinate arrow frame to show location of compound-ray eye/agent_body (in case they are tiny)
         mplot::CoordArrows<glver>* agent_coords = nullptr;
-        // A coordinate arrow frame showing the stabilised ego heading
+        // A coordinate arrow frame showing the agent's compass heading (i.e. the forward direction of the agent). 
         mplot::CoordArrows<glver>* compass_coords = nullptr;
 
         // Visualization of a breadcrumb trail
@@ -1297,18 +1275,14 @@ export namespace craysim
         float hoverheight = 0.01f;
         // We keep a track of the eye size. Used in detect_camera_changes
         std::size_t last_eye_size = 0u;
-        // True when ommatidia positions/directions have changed and EyeVisual needs full geometry reinit.
-        bool ommatidia_geometry_dirty = false;
 
         // Random route generation object
         std::unique_ptr<craysim::random_walk<float>> rrg;
 
         // For debug saving and computation of instantaneous velocity
-        sm::mat<float, 4> tm1_cam_to_scene = [] {
-            sm::mat<float, 4> m;
-            m.arr.fill (std::numeric_limits<float>::quiet_NaN());
-            return m;
-        }();
+        sm::mat<float, 4> tm1_cam_to_scene;
+        tm1_cam_to_scene.set_from (std::numeric_limits<float>::quiet_NaN());
+
         sm::vec<float> tm1_mv_camframe = {};
         std::uint32_t tm1_ti0 = 0u;
 
@@ -1562,8 +1536,7 @@ export namespace craysim
     };
 
     // Add a suitable 2D projection to show our ant eye (distributed with OCES) in a flat fiew
-    template <int GLVersion>
-    void add_ant_eye_spherical_projection (craysim::visual<GLVersion>& v, mplot::compoundray::EyeVisual<GLVersion>* eyevm2)
+    void add_ant_eye_spherical_projection (craysim::visual<glver>& v, mplot::compoundray::EyeVisual<glver>* eyevm2)
     {
         // First eye of eye pair (one spherical projection)
         std::uint32_t sz = 1024;
@@ -1582,10 +1555,10 @@ export namespace craysim
         sm::vec<> twod_offset2 = { -0.0004f, 0.0007f, 0.0f }; // post scale/rotate translation
         sm::vec<> twod_shift = {0,0.0006,0};
         float rotn = -sm::mathconst<float>::pi_over_8;
-        auto ptype = mplot::compoundray::EyeVisual<GLVersion>::projection_type::mercator;
+        auto ptype = mplot::compoundray::EyeVisual<glver>::projection_type::mercator;
         if (v.oces_reader.read_success == true) {
             std::cout << "Read from oces file!!\n";
-            ptype = mplot::compoundray::EyeVisual<GLVersion>::projection_type::equirectangular;
+            ptype = mplot::compoundray::EyeVisual<glver>::projection_type::equirectangular;
             twod_tr.translate (twod_shift);
         } else {
             twod_tr.translate (twod_offset2);
