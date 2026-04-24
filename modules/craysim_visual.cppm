@@ -363,6 +363,12 @@ export namespace craysim
             this->film_director.init (path);
             if (this->film_director.ready) {
                 // Get list of movement time points at which camera movements should be created
+                nlohmann::json directions = this->film_director.get ("directions");
+                // Iterate though directions
+                for (auto dirn : directions) {
+                    sm::config c (dirn);
+                    std::cout << "Time for this one is " << c.get<std::int32_t>("time", 0) << std::endl;
+                }
             }
         }
 
