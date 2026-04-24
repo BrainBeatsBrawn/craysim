@@ -533,7 +533,6 @@ export namespace craysim
                     this->eye->reinit();
                     for (auto oe : other_eyes) { oe->reinit(); }
                     this->last_eye_size = curr_eye_size;
-                    this->ommatidia_geometry_dirty = false;
                 } else {
                     this->eye->reinitColours();
                     for (auto oe : other_eyes) { oe->reinitColours(); } // 4x faster to just reinitColours
@@ -547,7 +546,7 @@ export namespace craysim
             sm::mat<float, 4> curr_cam_to_scene = mplot::compoundray::getCameraSpace(scene);
             
             // If this is the first call, just store and return false
-            if (std::isnan (this->tm1_cam_to_scene.arr[0])) {
+            if (tm1_cam_to_scene[0] == std::numeric_limits<float>::max()) {
                 this->tm1_cam_to_scene = curr_cam_to_scene;
                 return false;
             }
@@ -755,9 +754,6 @@ export namespace craysim
                 rotateCamerasLocallyAround (this->get_roll_rotation_angle(), 0.0f, 0.0f, 1.0f);
 
                 cam_to_scene = mplot::compoundray::getCameraSpace (scene); // update
-                
-                // Move the camera to the new position
-                setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
             }
 
             if (this->is_actively_translating()) {
@@ -1280,8 +1276,7 @@ export namespace craysim
         std::unique_ptr<craysim::random_walk<float>> rrg;
 
         // For debug saving and computation of instantaneous velocity
-        sm::mat<float, 4> tm1_cam_to_scene;
-        tm1_cam_to_scene.set_from (std::numeric_limits<float>::quiet_NaN());
+        sm::mat<float, 4> tm1_cam_to_scene = { std::numeric_limits<float>::max() };
 
         sm::vec<float> tm1_mv_camframe = {};
         std::uint32_t tm1_ti0 = 0u;
@@ -1536,6 +1531,7 @@ export namespace craysim
     };
 
     // Add a suitable 2D projection to show our ant eye (distributed with OCES) in a flat fiew
+    template <int glver>
     void add_ant_eye_spherical_projection (craysim::visual<glver>& v, mplot::compoundray::EyeVisual<glver>* eyevm2)
     {
         // First eye of eye pair (one spherical projection)
