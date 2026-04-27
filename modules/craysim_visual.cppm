@@ -873,16 +873,7 @@ export namespace craysim
             if (this->csv_positions.size() > this->move_counter) {
 
                 if (this->directions.contains (this->move_counter)) {
-                    if (this->directions[this->move_counter].event == mplot::direction_event::sceneview) {
-                        std::cout << "Setting sceneview now\n";
-                        this->setSceneview (this->directions[this->move_counter].sceneview);
-                    } else if (this->directions[this->move_counter].event == mplot::direction_event::timed_translation) {
-                        // Start timed translation.
-                        this->timedSceneviewTranslation (this->directions[this->move_counter].translation,
-                                                         this->directions[this->move_counter].transform_time);
-                    } else {
-                        std::cout << "Event type is not sceneview\n";
-                    }
+                    this->setCurrentDirectionEvent (this->directions[this->move_counter]);
                 }
 
                 /*
