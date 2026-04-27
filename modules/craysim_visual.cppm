@@ -406,6 +406,11 @@ export namespace craysim
                             this->directions[t] = direction_data();
                             this->directions[t].sceneview = c.get_vec<float, 16> ("sceneview");
                             this->directions[t].event = direction_event::sceneview;
+                        } else if (et == "timed_translation") {
+                            this->directions[t] = direction_data();
+                            this->directions[t].translation = c.get_vec<float, 3> ("translation");
+                            this->directions[t].transform_time = c.get<float> ("transform_time", 1.0f);
+                            this->directions[t].event = direction_event::timed_translation;
                         } else {
                             std::cout << "Unknown event type\n";
                         }
@@ -884,12 +889,14 @@ export namespace craysim
 
             if (this->csv_positions.size() > this->move_counter) {
 
-                std::cout << "move_counter = " << move_counter << std::endl;
-                std::cout << "We have " << this->directions.size() << " directions\n";
                 if (this->directions.contains (this->move_counter)) {
                     if (this->directions[this->move_counter].event == direction_event::sceneview) {
                         std::cout << "Setting sceneview now\n";
                         this->setSceneview (this->directions[this->move_counter].sceneview);
+                    } else if (this->directions[this->move_counter].event == direction_event::timed_translation) {
+                        // Start timed translation.
+                        this->timedSceneviewTranslation (this->directions[this->move_counter].translation,
+                                                         this->directions[this->move_counter].transform_time);
                     } else {
                         std::cout << "Event type is not sceneview\n";
                     }
