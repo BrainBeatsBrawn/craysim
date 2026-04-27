@@ -249,8 +249,20 @@ export namespace craysim
             this->setup_eyevisual();
             this->setup_breadcrumbs (1000u); // default 1000 breadcrumbs
             this->setup_agent_coords();
-            if (!prog_opts.film_director_path.empty()) {
-                this->setup_film_director (prog_opts.film_director_path);
+
+            // For json film direction, first try a path based on any csv path we have
+            if (prog_opts.film_director_path.empty() && !prog_opts.csv_path.empty()) {
+                // Construct json path from csv path and try that
+                std::string candidate_json = prog_opts.csv_path;
+                mplot::tools::stripFileSuffix (candidate_json);
+                candidate_json += ".json";
+                std::cout << "Attempt to open csv's partner json: " << candidate_json << std::endl;
+                this->setup_film_director (candidate_json);
+
+            } else {
+                if (!prog_opts.film_director_path.empty()) {
+                    this->setup_film_director (prog_opts.film_director_path);
+                }
             }
 
             this->record.init (prog_opts.h5_path, std::ios::out | std::ios::trunc);
@@ -378,25 +390,31 @@ export namespace craysim
 
         void setup_film_director (const std::string& path)
         {
-            this->film_director.init (path);
-            if (this->film_director.ready) {
-                // Get list of movement time points at which camera movements should be created
-                nlohmann::json directions = this->film_director.get ("directions");
-                // Iterate though directions
-                for (auto dirn : directions) {
-                    sm::config c (dirn);
+            try {
+                this->film_director.init (path);
+                if (this->film_director.ready) {
+                    // Get list of movement time points at which camera movements should be created
+                    nlohmann::json directions = this->film_director.get ("directions");
+                    // Iterate though directions
+                    for (auto dirn : directions) {
+                        sm::config c (dirn);
 
-                    std::uint32_t t = c.get<std::uint32_t>("event_time", 0);
-                    std::string et = c.get<std::string>("event_type", "unknown");
+                        std::uint32_t t = c.get<std::uint32_t>("event_time", 0);
+                        std::string et = c.get<std::string>("event_type", "unknown");
 
-                    if (et == "sceneview") {
-                        this->directions[t] = direction_data();
-                        this->directions[t].sceneview = c.get_vec<float, 16> ("sceneview");
-                        this->directions[t].event = direction_event::sceneview;
-                    } else {
-                        std::cout << "Unknown event type\n";
+                        if (et == "sceneview") {
+                            this->directions[t] = direction_data();
+                            this->directions[t].sceneview = c.get_vec<float, 16> ("sceneview");
+                            this->directions[t].event = direction_event::sceneview;
+                        } else {
+                            std::cout << "Unknown event type\n";
+                        }
                     }
+                } else {
+                    std::cout << "Failed to open JSON file " << path << std::endl;
                 }
+            } catch (const std::exception& e) {
+                std::cout << "Failed to open JSON file " << path << " (exception: " << e.what() << ")";
             }
         }
 
