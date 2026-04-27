@@ -396,9 +396,8 @@ export namespace craysim
                             this->directions[t].event = mplot::direction_event::timed_translation;
                         } else if (et == "timed_rotation") {
                             this->directions[t] = mplot::direction_data();
-                            const float angle = c.get<float> ("angle_degrees", 0.0f) * sm::mathconst<float>::deg2rad;
-                            const sm::vec<float> raxis = c.get_vec<float, 3> ("axis");
-                            this->directions[t].rotation = sm::quaternion<float>(raxis, angle);
+                            this->directions[t].about_vert_angle = c.get<float> ("about_vert_angle_degrees", 0.0f) * sm::mathconst<float>::deg2rad;
+                            this->directions[t].tilt_angle = c.get<float> ("tilt_angle_degrees", 0.0f) * sm::mathconst<float>::deg2rad;
                             this->directions[t].transform_time = c.get<float> ("transform_time", 1.0f);
                             this->directions[t].event = mplot::direction_event::timed_rotation;
                         } else {
