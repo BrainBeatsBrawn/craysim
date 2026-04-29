@@ -73,6 +73,7 @@ export namespace craysim
         std::string csv_path = {};
         std::string h5_path = {};
         std::string hovh = {};
+        bool make_movie = false;
     };
 
     // Parse cmd line to find the path and set options. Return filepath of main scene gltf file and any csv path
@@ -105,6 +106,8 @@ export namespace craysim
                 rtn.opts |= craysim::options::debug_mv;
             } else if (arg == "-H") {
                 rtn.hovh = std::string(argv[++i]);
+            } else if (arg == "-m") {
+                rtn.make_movie = true;
             }
         }
         if (rtn.gltf_path.empty()) {
@@ -371,10 +374,20 @@ export namespace craysim
         }
 
         // Probably to go to mathplot
+        std::string film_director_path = {};
         void setup_film_director (const std::string& path)
         {
+            std::cout << __func__ << " called with path " << path << std::endl;
+            std::string _path = path;
             try {
-                this->film_director.init (path);
+                this->directions.clear();
+                if (path.empty() && !this->film_director_path.empty()) {
+                    _path = this->film_director_path;
+                }
+                this->film_director_path = _path;
+
+                this->film_director.init (_path);
+
                 if (this->film_director.ready) {
                     // Get list of movement time points at which camera movements should be created
                     nlohmann::json directions = this->film_director.get ("directions");
@@ -392,12 +405,14 @@ export namespace craysim
                         } else if (et == "timed_translation") {
                             this->directions[t] = mplot::direction_data();
                             this->directions[t].translation = c.get_vec<float, 3> ("translation");
+                            this->directions[t].transform_time_frames = c.get<std::uint32_t> ("transform_time_frames", 0u);
                             this->directions[t].transform_time = c.get<float> ("transform_time", 1.0f);
                             this->directions[t].event = mplot::direction_event::timed_translation;
                         } else if (et == "timed_rotation") {
                             this->directions[t] = mplot::direction_data();
                             this->directions[t].about_vert_angle = c.get<float> ("about_vert_angle_degrees", 0.0f) * sm::mathconst<float>::deg2rad;
                             this->directions[t].tilt_angle = c.get<float> ("tilt_angle_degrees", 0.0f) * sm::mathconst<float>::deg2rad;
+                            this->directions[t].transform_time_frames = c.get<std::uint32_t> ("transform_time_frames", 0u);
                             this->directions[t].transform_time = c.get<float> ("transform_time", 1.0f);
                             this->directions[t].event = mplot::direction_event::timed_rotation;
                         } else {
@@ -405,10 +420,11 @@ export namespace craysim
                         }
                     }
                 } else {
-                    std::cout << "Failed to open JSON file " << path << std::endl;
+                    std::cout << "Failed to open JSON file '" << _path << "'\n";
                 }
+
             } catch (const std::exception& e) {
-                std::cout << "Failed to open JSON file " << path << " (exception: " << e.what() << ")";
+                std::cout << "Failed to open JSON file '" << _path << "' (exception: " << e.what() << ")\n";
             }
         }
 
@@ -434,7 +450,7 @@ export namespace craysim
                 this->breadcrumb_coords.push_back (bc_location);
                 this->breadcrumb_data.push_back (0.0f); // dummy for now
             } else {
-                this->breadcrumb_coords[move_counter % this->isvp->max_instances] = bc_location;
+                this->breadcrumb_coords[this->move_counter % this->isvp->max_instances] = bc_location;
                 // breadcrumb_data.push_back (0.0f); // dummy for now, to be flags.
             }
             if (this->bc_clr.empty() || this->bc_alpha.empty() || this->bc_scale.empty()) {
@@ -547,6 +563,8 @@ export namespace craysim
             if (this->vstate.test (state::campose_reset_request) == true) {
                 this->stop(); // cancel any active movements
                 setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (this->initial_camera_space));
+
+                this->setup_film_director (std::string(""));
 
                 this->clear_breadcrumbs();
                 if (this->sim_opts.test (craysim::options::path_from_csv) && !this->csv_positions.empty()) {
@@ -807,7 +825,7 @@ export namespace craysim
             this->agent_coords->setViewMatrix (cam_to_scene);
         }
 
-        void walk_over_land (const float fps)
+        void walk_over_land()
         {
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
 
@@ -870,7 +888,7 @@ export namespace craysim
             this->agent_coords->setViewMatrix (cam_to_scene);
         }
 
-        bool csv_playback (const float fps)
+        bool csv_playback()
         {
             bool rtn = true;
 
@@ -880,6 +898,10 @@ export namespace craysim
 
                 if (this->directions.contains (this->move_counter)) {
                     this->setCurrentDirectionEvent (this->directions[this->move_counter]);
+                }
+
+                if (this->move_counter && (this->move_counter % 500) == 0) {
+                    std::cout << "CSV Playback move " << this->move_counter << "...\n";
                 }
 
                 /*
@@ -1022,15 +1044,13 @@ export namespace craysim
         // Call this from your main loop. Returns true if slow windows were processed
         bool render_and_poll ()
         {
-            ++this->render_counter;
-
             // The current camera may have changed, this subroutine deals with any changes in this->eye and other_eyes
             this->detect_camera_changes (this->other_eyes); // reinits the eyes
 
             // Now render the mathplot window
             this->render();
             // Change label after render (it needs v's context, not any of the other windows)
-            if (this->move_counter % 100 == 0) { this->fps_label_update(); }
+            if (this->move_counter % 33 == 0) { this->fps_label_update(); }
 
             // Save some electricity while developing - limit to 60 FPS. For max speed use this->poll() (-x)
             if (this->sim_opts.test (craysim::options::max_fps)) { this->poll(); } else { this->wait (this->frame_tau); }
@@ -1055,10 +1075,10 @@ export namespace craysim
             if (this->vstate.test (craysim::visual<glver>::state::paused) == false) {
 
                 if (this->vstate.test (craysim::visual<glver>::state::walk)) {
-                    this->walk_over_land (this->fps_profiler.fps_mean);
+                    this->walk_over_land();
                 } else if (this->sim_opts.test (craysim::options::path_from_csv) && this->csv_positions.size() > this->move_counter) {
                     // Construct path from csv file of 2D agent locations
-                    this->csv_playback (this->fps_profiler.fps_mean);
+                    this->csv_playback();
                 } else if (this->sim_opts.any_of ({craysim::options::api_movement, craysim::options::homing_mode})) {
                     // React to movements commanded by vec/quaternion or transformation matrix
                     // (i.e. by client code).
@@ -1130,7 +1150,7 @@ export namespace craysim
 
         void fps_label_update()
         {
-            this->fps_label->setupText (this->fps_profiler.fps_txt + std::string(" "));
+            this->fps_label->setupText (this->fps_profiler.fps_txt + std::string(" fr ") + std::to_string (this->move_counter));
         }
 
         std::vector<mplot::compoundray::Ommatidium>* get_ommatidia_ptr()
@@ -1235,10 +1255,6 @@ export namespace craysim
 
         // Visualization of a breadcrumb trail
         mplot::InstancedScatterVisual<glver>* isvp = nullptr;
-        // Track how many calls to render have been made. At 1000 FPS this overflows at 10^17 seconds which is about 10^9 years.
-        std::uint64_t render_counter = 0u;
-        // State for breadcrumb trail. A move counter
-        std::uint64_t move_counter = 0u;
         // Container for breadcrumb locations
         sm::vvec<sm::vec<float, 3>> breadcrumb_coords = {};
         // Container for breadcrumb data (size, colour, alpha, etc)
