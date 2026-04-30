@@ -996,7 +996,6 @@ export namespace craysim
         std::vector<mplot::Visual<glver>*> other_windows = {};
         std::vector<mplot::compoundray::EyeVisual<glver>*> other_eyes = {};
         std::vector<mplot::Visual<glver>*> slow_windows = {};
-
         // How many fast renders to wait until we re-render the slow windows?
         std::uint64_t slow_every = 10u;
 
@@ -1274,6 +1273,7 @@ export namespace craysim
 
         // Recording object
         sm::hdfdata record;// (h5_path, std::ios::out | std::ios::trunc);
+
 
         // Movement state (class and bitset) (flags?)
         enum class move_sense : uint16_t {
