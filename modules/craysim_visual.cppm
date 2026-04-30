@@ -6,6 +6,10 @@ module;
 #include <vector>
 #include <array>
 #include <memory>
+#include <span>
+#include <algorithm>
+#include <cmath>
+#include <limits>
 
 #include <MulticamScene.h>
 #include <libEyeRenderer.h> // getCurrentEyeSamplesPerOmmatidium
@@ -230,6 +234,7 @@ export namespace craysim
             this->setup_eyevisual();
             this->setup_breadcrumbs (1000u); // default 1000 breadcrumbs
             this->setup_agent_coords();
+            this->setup_compass_coords();
 
             this->record.init (prog_opts.h5_path, std::ios::out | std::ios::trunc);
         }
@@ -352,6 +357,19 @@ export namespace craysim
             this->agent_coords = this->addVisualModel (antca);
             this->agent_coords->name = "agent";
             this->agent_coords->setViewMatrix (this->initial_camera_space);
+        }
+
+        void setup_compass_coords()
+        {
+            auto compass_coords_up = std::make_unique<mplot::CoordArrows<glver>> (sm::vec<float>{0.0f});
+            compass_coords_up->set_parent (this->get_id());
+            compass_coords_up->em = 0.0f;
+            compass_coords_up->lengths = {1.5f, 1.5f, 1.5f};
+            compass_coords_up->thickness = 0.3f;
+            compass_coords_up->finalize();
+            this->compass_coords = this->addVisualModel (compass_coords_up);
+            this->compass_coords->name = "Compass";
+            this->compass_coords->setViewMatrix (this->get_compass_matrix());
         }
 
         void setup_random_walk (const std::uint32_t _n_steps = 1500, const std::uint32_t _a_tau = 150, const float _kappa = 100, const float _a_max = 100)
@@ -513,6 +531,7 @@ export namespace craysim
             if (this->eye == nullptr) { return; }
 
             std::size_t curr_eye_size = this->last_eye_size;
+            if (isCompoundEyeActive()) { this->ommatidia = &scene->m_ommVecs[scene->getCameraIndex()]; }
             // Detect changes in the camera and update eye model as necessary
             if (this->ommatidia_data.size() == 0) {
                 if (isCompoundEyeActive()) { getCameraData (this->ommatidia_data); }
@@ -533,6 +552,61 @@ export namespace craysim
                     for (auto oe : other_eyes) { oe->reinitColours(); } // 4x faster to just reinitColours
                 }
             }
+        }
+
+        // Has the camera rotated since the last ime step? Returns true if rotation in any plane is greater than the threshold.
+        bool camera_has_rotated (float rotation_threshold_rad = 0.01745f) // default threshold of ~1 degree
+        {
+            sm::mat<float, 4> curr_cam_to_scene = mplot::compoundray::getCameraSpace(scene);
+
+            // If this is the first call, just store and return false
+            if (tm1_cam_to_scene[0] == std::numeric_limits<float>::max()) {
+                this->tm1_cam_to_scene = curr_cam_to_scene;
+                return false;
+            }
+
+            // Extract the 3x3 rotation parts from both matrices
+            sm::mat<float, 3, 3> curr_rot = curr_cam_to_scene.linear();
+            sm::mat<float, 3, 3> prev_rot = this->tm1_cam_to_scene.linear();
+
+            // Compute relative rotation: delta = prev^T * curr
+            sm::mat<float, 3, 3> delta_rot = prev_rot.transpose() * curr_rot;
+
+            // Extract Euler angles (pitch, roll, yaw) from the relative rotation matrix
+            // Pitch (rotation around x-axis)
+            float pitch = std::atan2 (delta_rot(2, 1), delta_rot(2, 2));
+
+            // Roll (rotation around y-axis) - with clipping to avoid asin domain issues
+            float roll_arg = std::clamp (-delta_rot(2, 0), -1.0f, 1.0f);
+            float roll = std::asin (roll_arg);
+
+            // Yaw (rotation around z-axis)
+            float yaw = std::atan2 (delta_rot(1, 0), delta_rot(0, 0));
+
+            // Find the largest rotation angle
+            float max_rotation = std::max({std::abs(pitch), std::abs(roll), std::abs(yaw)});
+
+            // Update stored frame for next call
+            this->tm1_cam_to_scene = curr_cam_to_scene;
+
+            return max_rotation > rotation_threshold_rad;
+        }
+
+        sm::mat<float, 4> get_compass_matrix ()
+        {
+            // Project camera forward (z-axis) onto the y=0 ground plane to get heading direction
+            sm::mat<float,4> cam_to_scene = mplot::compoundray::getCameraSpace(scene);
+            // Vector pointing in the camera's forward direction, defined as the z direction in the camera's frame
+            sm::vec<float> cam_z = cam_to_scene.col(2).less_one_dim();
+            cam_z.renormalize();
+            // Project the camera downward onto the ground plane (normal to the ground plane is the "up" direction) to get the forward direction of the agent's heading.
+            sm::vec<float> fwd = sm::geometry::vector_plane_projection (this->scene_up, cam_z);
+            fwd.renormalize();
+
+            auto compass_matrix = sm::mat<float, 4>::frombasis (this->scene_up.cross (fwd), this->scene_up, fwd);
+            compass_matrix.pretranslate (cam_to_scene.translation());
+
+            return compass_matrix;
         }
 
         // Obtain the current heading of the camera, with respect to the world/scene axes, where
@@ -680,6 +754,8 @@ export namespace craysim
         // Make a keyboard based movement over the landscape
         void key_move_over_land (const float fps)
         {
+            if (isCompoundEyeActive()) { this->ommatidia = &scene->m_ommVecs[scene->getCameraIndex()]; }
+
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
             if (this->is_actively_rotating()) {
                 // Up-down (pitch) is rotation about local camera frame axis x
@@ -738,8 +814,10 @@ export namespace craysim
                     }
                 }
 
+                // Move the camera to the new position
                 setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
 
+                // Add a breadcrumb at the previous location
                 this->add_breadcrumb (lastloc);
             }
             this->check_reset_camspace (cam_to_scene); // if requested
@@ -985,6 +1063,9 @@ export namespace craysim
             this->instantaneous_velocity = {}; // velocity computed per render cycle
 
             this->agent_coords->setHide (!this->vstate.test(craysim::visual<glver>::state::show_camframe));
+            if (this->compass_coords != nullptr) {
+                this->compass_coords->setHide (!this->vstate.test(craysim::visual<glver>::state::show_compass));
+            }
 
             // Any of the following movement-creating functions will set the instantaneous velocity
             //
@@ -1025,6 +1106,10 @@ export namespace craysim
             // Scale size of breadcrumbs based on distance
             float iscl = 1.0f * std::log (1.0f + this->get_d_to_rotation_centre());
             this->isvp->set_instance_scale (iscl);
+
+            if (this->compass_coords != nullptr) {
+                this->compass_coords->setViewMatrix (this->get_compass_matrix());
+            }
 
             return (this->render_counter % this->slow_every) == 0u;
         }
@@ -1169,6 +1254,8 @@ export namespace craysim
         mplot::VisualModel<glver>* agent_body = nullptr;
         // A coordinate arrow frame to show location of compound-ray eye/agent_body (in case they are tiny)
         mplot::CoordArrows<glver>* agent_coords = nullptr;
+        // A coordinate arrow frame showing the agent's compass heading (i.e. the forward direction of the agent).
+        mplot::CoordArrows<glver>* compass_coords = nullptr;
 
         // Visualization of a breadcrumb trail
         mplot::InstancedScatterVisual<glver>* isvp = nullptr;
@@ -1211,7 +1298,7 @@ export namespace craysim
         std::unique_ptr<craysim::random_walk<float>> rrg;
 
         // For debug saving and computation of instantaneous velocity
-        sm::mat<float, 4> tm1_cam_to_scene;
+        sm::mat<float, 4> tm1_cam_to_scene = { std::numeric_limits<float>::max() };
         sm::vec<float> tm1_mv_camframe = {};
         std::uint32_t tm1_ti0 = 0u;
 
@@ -1239,6 +1326,7 @@ export namespace craysim
             show_cones,            // Parameter for EyeVisual. Draw simple flared tubes in mathplot window
             campose_reset_request, // A request to reset the pose of the camera
             show_camframe,         // Show camera axes?
+            show_compass,          // Show compass axes?
             paused,                // Pause sim (i.e. pause time)?
             stepfwd,               // If true and if paused is true, step forward one timestep in the camera input
             walk,                  // If true, do a random walk
@@ -1426,6 +1514,8 @@ export namespace craysim
                     this->vstate.flip (state::walk);
                 } else if (key == mplot::key::c) {
                     this->vstate.flip (state::show_camframe);
+                } else if (key == mplot::key::e) {
+                    this->vstate.flip (state::show_compass);
                 } else if (key == mplot::key::o) {
                     std::cout << "Flip homing\n";
                     this->sim_opts.flip (craysim::options::homing_mode);
