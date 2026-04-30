@@ -42,7 +42,6 @@ export import oces.reader;
 
 import craysim.random_walk;
 
-
 // Reproduce controller functions for the mplot window for ease of use
 export namespace craysim
 {
@@ -543,37 +542,37 @@ export namespace craysim
         bool camera_has_rotated (float rotation_threshold_rad = 0.01745f) // default threshold of ~1 degree
         {
             sm::mat<float, 4> curr_cam_to_scene = mplot::compoundray::getCameraSpace(scene);
-            
+
             // If this is the first call, just store and return false
             if (tm1_cam_to_scene[0] == std::numeric_limits<float>::max()) {
                 this->tm1_cam_to_scene = curr_cam_to_scene;
                 return false;
             }
-            
+
             // Extract the 3x3 rotation parts from both matrices
             sm::mat<float, 3, 3> curr_rot = curr_cam_to_scene.linear();
             sm::mat<float, 3, 3> prev_rot = this->tm1_cam_to_scene.linear();
-            
+
             // Compute relative rotation: delta = prev^T * curr
             sm::mat<float, 3, 3> delta_rot = prev_rot.transpose() * curr_rot;
-            
+
             // Extract Euler angles (pitch, roll, yaw) from the relative rotation matrix
             // Pitch (rotation around x-axis)
             float pitch = std::atan2 (delta_rot(2, 1), delta_rot(2, 2));
-            
+
             // Roll (rotation around y-axis) - with clipping to avoid asin domain issues
             float roll_arg = std::clamp (-delta_rot(2, 0), -1.0f, 1.0f);
             float roll = std::asin (roll_arg);
-            
+
             // Yaw (rotation around z-axis)
             float yaw = std::atan2 (delta_rot(1, 0), delta_rot(0, 0));
-            
+
             // Find the largest rotation angle
             float max_rotation = std::max({std::abs(pitch), std::abs(roll), std::abs(yaw)});
-            
+
             // Update stored frame for next call
             this->tm1_cam_to_scene = curr_cam_to_scene;
-                        
+
             return max_rotation > rotation_threshold_rad;
         }
 
@@ -742,7 +741,6 @@ export namespace craysim
             if (isCompoundEyeActive()) { this->ommatidia = &scene->m_ommVecs[scene->getCameraIndex()]; }
 
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
-
             if (this->is_actively_rotating()) {
                 // Up-down (pitch) is rotation about local camera frame axis x
                 rotateCamerasLocallyAround (this->get_vertical_rotation_angle(), 1.0f, 0.0f, 0.0f);
@@ -750,10 +748,8 @@ export namespace craysim
                 rotateCamerasLocallyAround (this->get_horizontal_rotation_angle(), 0.0f, 1.0f, 0.0f);
                 // Roll
                 rotateCamerasLocallyAround (this->get_roll_rotation_angle(), 0.0f, 0.0f, 1.0f);
-
                 cam_to_scene = mplot::compoundray::getCameraSpace (scene); // update
             }
-
             if (this->is_actively_translating()) {
                 if (this->move_state.test (craysim::visual<glver>::move_sense::up)) {
                     this->hoverheight += 0.0001f;
@@ -808,7 +804,6 @@ export namespace craysim
                 // Add a breadcrumb at the previous location
                 this->add_breadcrumb (lastloc);
             }
-
             this->check_reset_camspace (cam_to_scene); // if requested
             // Update the view matrix of eye and eye localspace axes
             if (this->eye != nullptr) { this->eye->setViewMatrix (cam_to_scene); }
@@ -1231,7 +1226,7 @@ export namespace craysim
         mplot::VisualModel<glver>* agent_body = nullptr;
         // A coordinate arrow frame to show location of compound-ray eye/agent_body (in case they are tiny)
         mplot::CoordArrows<glver>* agent_coords = nullptr;
-        // A coordinate arrow frame showing the agent's compass heading (i.e. the forward direction of the agent). 
+        // A coordinate arrow frame showing the agent's compass heading (i.e. the forward direction of the agent).
         mplot::CoordArrows<glver>* compass_coords = nullptr;
 
         // Visualization of a breadcrumb trail
@@ -1274,7 +1269,6 @@ export namespace craysim
 
         // For debug saving and computation of instantaneous velocity
         sm::mat<float, 4> tm1_cam_to_scene = { std::numeric_limits<float>::max() };
-
         sm::vec<float> tm1_mv_camframe = {};
         std::uint32_t tm1_ti0 = 0u;
 
