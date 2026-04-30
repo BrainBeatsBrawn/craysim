@@ -10,7 +10,6 @@ module;
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <stdexcept>
 
 #include <MulticamScene.h>
 #include <libEyeRenderer.h> // getCurrentEyeSamplesPerOmmatidium
@@ -589,8 +588,7 @@ export namespace craysim
             sm::vec<float> fwd = sm::geometry::vector_plane_projection (this->scene_up, cam_z);
             fwd.renormalize();
 
-            sm::mat<float, 4> compass_matrix;
-            compass_matrix.frombasis_inplace (this->scene_up.cross (fwd), this->scene_up, fwd);
+            auto compass_matrix = sm::mat<float, 4>::frombasis (this->scene_up.cross (fwd), this->scene_up, fwd);
             compass_matrix.pretranslate (cam_to_scene.translation());
 
             return compass_matrix;
@@ -1211,7 +1209,6 @@ export namespace craysim
         sm::flags<craysim::options> sim_opts;
         // A member fps_profiler
         mplot::fps::profiler fps_profiler;
-        mplot::fps::profiler set_om_profiler;
         // The FPS label, accessible to client code
         mplot::VisualTextModel<glver>* fps_label;
         // Base path for glTF file
