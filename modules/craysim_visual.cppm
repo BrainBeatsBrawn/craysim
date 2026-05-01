@@ -76,6 +76,7 @@ export namespace craysim
         std::string csv_path = {};
         std::string h5_path = {};
         std::string hovh = {};
+        bool make_movie = false;
     };
 
     // Parse cmd line to find the path and set options. Return filepath of main scene gltf file and any csv path
