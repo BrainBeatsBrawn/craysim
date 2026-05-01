@@ -115,7 +115,10 @@ export namespace craysim
             rtn.opts |= craysim::options::can_exit;
         }
 
-        rtn.h5_path = rtn.csv_path;
+
+        // If csv_path had commas in it, then just use the first one.
+        std::vector<std::string> cpaths = mplot::tools::stringToVector (rtn.csv_path, ",");
+        if (!cpaths.empty()) { rtn.h5_path = cpaths[0]; }
         mplot::tools::stripFileSuffix (rtn.h5_path);
         if (rtn.h5_path.empty()) { rtn.h5_path = "trail"; }
         rtn.h5_path += ".h5";
@@ -237,8 +240,11 @@ export namespace craysim
 
             // For json film direction, first try a path based on any csv path we have
             if (prog_opts.film_director_path.empty() && !prog_opts.csv_path.empty()) {
+                // If csv_path had commas in it, then just use the first one.
+                std::vector<std::string> cpaths = mplot::tools::stringToVector (prog_opts.csv_path, ",");
                 // Construct json path from csv path and try that
-                std::string candidate_json = prog_opts.csv_path;
+                std::string candidate_json = "";
+                if (!cpaths.empty()) { candidate_json = cpaths[0]; }
                 mplot::tools::stripFileSuffix (candidate_json);
                 candidate_json += ".json";
                 std::cout << "Attempt to open csv's partner json: " << candidate_json << std::endl;
@@ -1121,7 +1127,7 @@ export namespace craysim
         // Save once-only data into the recording file (ommatidia data)
         void complete_recording()
         {
-            if (this->sim_opts.test (craysim::options::path_from_csv)) {
+            if (this->sim_opts.all_of ({craysim::options::path_from_csv, craysim::options::save_hdf5})) {
                 // convert std::vector<Ommatidium>* ommatidia into vvecs that can be h5 saved
                 auto ommat = this->get_ommatidia_ptr();
                 sm::vvec<sm::vec<float, 3>> o_pos;
@@ -1142,6 +1148,7 @@ export namespace craysim
                 this->record.add_contained_vals ("/ommatidia/acceptanceAngleRadians", o_aa);
                 std::cout << "FO\n";
                 this->record.add_contained_vals ("/ommatidia/focalPointOffset", o_fo);
+                std::cout << "Completed recording" << std::endl;
             }
         }
 
