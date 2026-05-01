@@ -1118,7 +1118,7 @@ export namespace craysim
             }
 
             // Scale size of breadcrumbs based on distance
-            float iscl = 1.0f * std::log (1.0f + this->get_d_to_rotation_centre());
+            float iscl = this->bc_mult * std::log (1.0f + this->bc_mult * this->get_d_to_rotation_centre());
             this->isvp->set_instance_scale (iscl);
 
             return (this->render_counter % this->slow_every) == 0u;
@@ -1280,6 +1280,8 @@ export namespace craysim
         sm::vvec<float> bc_scale;
         // Skip some add_breadcrumb calls with this
         std::uint32_t breadcrumb_every = 1u;
+        // Overall size multiplier for breadcrumbs
+        float bc_mult = 2.0f;
 
         // Client code gives us names of the navigation landscape. If we find the landscape, store a pointer to it with this
         mplot::VisualModel<glver>* land = nullptr;
