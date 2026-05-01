@@ -973,7 +973,9 @@ export namespace craysim
                 }
 
                 ++this->move_counter;
-                this->add_breadcrumb (lastcamloc);
+                if (this->move_counter % breadcrumb_every == 0u) {
+                    this->add_breadcrumb (lastcamloc);
+                }
 
             } else { // no more movements
                 rtn = false;
@@ -1269,6 +1271,8 @@ export namespace craysim
         sm::vvec<float> bc_alpha;
         // Breadcrumb scale values. May be empty. Set up in your client code
         sm::vvec<float> bc_scale;
+        // Skip some add_breadcrumb calls with this
+        std::uint32_t breadcrumb_every = 1u;
 
         // Client code gives us names of the navigation landscape. If we find the landscape, store a pointer to it with this
         mplot::VisualModel<glver>* land = nullptr;
