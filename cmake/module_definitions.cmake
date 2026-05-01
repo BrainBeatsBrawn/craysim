@@ -18,6 +18,7 @@ macro(setup_module_variables_for_craysim_maths base_directory)
   )
   set(CRAYSIM_MATHS_ANTBODY_MODULES
     ${base_directory}/sm/config.cppm
+    ${base_directory}/json/src/modules/json.cppm
   )
 endmacro()
 
