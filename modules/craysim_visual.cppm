@@ -445,7 +445,6 @@ export namespace craysim
         {
             if (this->isvp == nullptr) { return; }
 
-            ++this->move_counter;
             if (this->breadcrumb_coords.size() < this->isvp->max_instances) {
                 this->breadcrumb_coords.push_back (bc_location);
                 this->breadcrumb_data.push_back (0.0f); // dummy for now
@@ -746,6 +745,7 @@ export namespace craysim
 
             setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
 
+            ++this->move_counter;
             this->add_breadcrumb (lastloc);
 
             if (this->eye != nullptr) { this->eye->setViewMatrix (cam_to_scene); }
@@ -816,6 +816,8 @@ export namespace craysim
 
                 setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
 
+                // Add a breadcrumb at the previous location
+                ++this->move_counter;
                 this->add_breadcrumb (lastloc);
             }
             this->check_reset_camspace (cam_to_scene); // if requested
@@ -849,6 +851,7 @@ export namespace craysim
                 this->tm1_ti0 = ti0_sv;
                 this->tm1_mv_camframe = mv_camframe;
                 this->tm1_cam_to_scene = cam_to_scene_sv;
+                ++this->move_counter;
                 this->add_breadcrumb (cam_to_scene_sv.translation());
 
             } catch (const std::exception& e) {
@@ -969,7 +972,8 @@ export namespace craysim
                               << this->csv_positions[this->move_counter] << " (failed to find triangle hit)\n";
                 }
 
-                this->add_breadcrumb (lastcamloc); // increments move_counter
+                ++this->move_counter;
+                this->add_breadcrumb (lastcamloc);
 
             } else { // no more movements
                 rtn = false;
