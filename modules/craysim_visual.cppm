@@ -300,12 +300,23 @@ export namespace craysim
             this->ommatidia_datas.resize (num_compound_cameras);
             this->ommatidias.resize (num_compound_cameras);
 
-            // Now switch to our compound ray camera and set the samples per ommatidium/element
+            // Now switch to our zeroth compound ray camera and set the samples per ommatidium/element
             if (my_compound_camera != -1) {
                 gotoCamera (0);
                 std::int32_t csamp = getCurrentEyeSamplesPerOmmatidium();
-                std::cout << "Current eye samples per ommatidium is " << csamp << std::endl;
+                std::cout << "Current eye samples per ommatidium for camera 0 is " << csamp << std::endl;
                 if (csamp < 32000) { changeCurrentEyeSamplesPerOmmatidiumBy (samples_per_omm_default - csamp); }
+                // Set samples for other compound eyes in the scene
+                nextCamera();
+                std::uint32_t _camidx = scene->getCameraIndex();
+                while (_camidx != 0) {
+                    csamp = getCurrentEyeSamplesPerOmmatidium();
+                    std::cout << "Current eye samples per ommatidium for camera " << _camidx << " is " << csamp << std::endl;
+                    if (csamp < 32000) { changeCurrentEyeSamplesPerOmmatidiumBy (samples_per_omm_default - csamp); }
+                    nextCamera();
+                    _camidx = scene->getCameraIndex();
+                }
+
             }
         }
 
@@ -601,8 +612,21 @@ export namespace craysim
             // Detect changes in the camera and update eye model as necessary
             std::uint32_t camidx = scene->getCameraIndex();
             if (this->ommatidia_datas[camidx].size() == 0) {
+
                 if (isCompoundEyeActive()) {
                     getCameraData (this->ommatidia_datas[camidx]);
+                }
+                // Check other compound eyes in the scene
+                nextCamera();
+                std::uint32_t _camidx = scene->getCameraIndex();
+                while (_camidx != camidx) {
+                    if (this->ommatidia_datas[camidx].size() == 0) {
+                        if (isCompoundEyeActive()) {
+                            getCameraData (this->ommatidia_datas[_camidx]);
+                        }
+                    }
+                    nextCamera();
+                    _camidx = scene->getCameraIndex();
                 }
             } // else no need to re-get data
 
@@ -1107,27 +1131,37 @@ export namespace craysim
                 }
             }
 
+            std::uint32_t camidx = 0;
             // Call the compound-ray ray casting method to recompute the compound-eye view of the scene
             renderFrame();
             // Access data so that a brain model could be fed
             if (isCompoundEyeActive()) {
-                std::uint32_t camidx = scene->getCameraIndex();
+                camidx = scene->getCameraIndex();
                 getCameraData (this->ommatidia_datas[camidx]);
                 this->ommatidias[camidx] = &scene->m_ommVecs[camidx];
 
-                if (this->ommatidia_datas.size() > 1) {
-                    gotoCamera (1);
-                    getCameraData (this->ommatidia_datas[1]);
-                    gotoCamera (0);
-                }
-
-                // if csv mode, then save the data
+                // if csv mode, then save the data (camidx 0 only)
                 if (camidx == 0 && this->sim_opts.all_of ({craysim::options::path_from_csv, craysim::options::save_hdf5})) {
                     std::cout << "Saving frame...\n";
                     std::string ommframe = "/ommatidia_data/frame_" + std::to_string (this->move_counter);
                     try {
                         record.add_contained_vals (ommframe.c_str(), this->ommatidia_datas[camidx]);
                     } catch (const std::exception& e) {} // Probably didn't move this time.
+                }
+            }
+
+            // Render any other compound eyes in the scene
+            if (this->ommatidia_datas.size() > 1) {
+                nextCamera();
+                std::uint32_t _camidx = scene->getCameraIndex();
+                while (_camidx != camidx) {
+                    renderFrame();
+                    if (isCompoundEyeActive()) {
+                        getCameraData (this->ommatidia_datas[_camidx]);
+                        this->ommatidias[_camidx] = &scene->m_ommVecs[_camidx];
+                    }
+                    nextCamera();
+                    _camidx = scene->getCameraIndex();
                 }
             }
 
