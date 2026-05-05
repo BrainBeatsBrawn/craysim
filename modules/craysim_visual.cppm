@@ -322,18 +322,22 @@ export namespace craysim
 
         void setup_oces()
         {
-            // Use oces_reader to read in our eye data, esp. for the head. THe OCES eye must be the zeroth eye.
-            std::string oces_path = this->efpaths[0];
-            mplot::tools::stripFileSuffix (oces_path);
-            oces_path += ".gltf";
-            // Now try to open oces_path
-            std::cout << "Attempt to load OCES file " << oces_path << "\n";
-            this->oces_reader.read (oces_path);
-            if (oces_reader.read_success == false) {
-                std::cout << "No associated OCES file for a head\n";
-            } else {
-                // Read the head and make a VisualModel
-                oces_reader.head_mesh.single_colour = {0.345f, 0.122f, 0.082f};
+            // Use oces_reader to read in our eye data, esp. for the head. One eye to be an OCES eye?
+            for (auto efp : this->efpaths) {
+                std::string oces_path = efp;
+                mplot::tools::stripFileSuffix (oces_path);
+                oces_path += ".gltf";
+                // Now try to open oces_path
+                std::cout << "Attempt to load OCES file " << oces_path << "\n";
+                this->oces_reader.read (oces_path);
+                if (oces_reader.read_success == false) {
+                    std::cout << "No associated OCES file for a head with this one.\n";
+                } else {
+                    std::cout << "Success loading OCES file " << oces_path << "\n";
+                    // Read the head and make a VisualModel
+                    oces_reader.head_mesh.single_colour = {0.345f, 0.122f, 0.082f};
+                    break;
+                }
             }
         }
 
@@ -1293,9 +1297,9 @@ export namespace craysim
         mplot::fps::profiler fps_profiler;
         // The FPS label, accessible to client code
         mplot::VisualTextModel<glver>* fps_label;
-        // Base path for glTF file
+        // Base path for glTF file of the scene
         std::string basepath = {};
-        // Full path for glTF file
+        // Full path for glTF file of the scene
         std::string path = {};
         // The eye file path(s)
         std::vector<std::string> efpaths;
@@ -1308,11 +1312,11 @@ export namespace craysim
         sm::mat<float, 4> initial_camera_space;
 
         // An mplot::VisualModel of the compound-ray eye
-        mplot::compoundray::EyeVisual<glver>* eye = nullptr;
+        mplot::compoundray::EyeVisual<glver>* eye = nullptr; // *** the one in the scene
         // You may have a VisualModel of an 'agent body' to go another with your eye's EyeVisual
-        mplot::VisualModel<glver>* agent_body = nullptr;
+        mplot::VisualModel<glver>* agent_body = nullptr; // ***
         // A coordinate arrow frame to show location of compound-ray eye/agent_body (in case they are tiny)
-        mplot::CoordArrows<glver>* agent_coords = nullptr;
+        mplot::CoordArrows<glver>* agent_coords = nullptr; // ***
 
         // Visualization of a breadcrumb trail
         mplot::InstancedScatterVisual<glver>* isvp = nullptr;
