@@ -287,18 +287,22 @@ export namespace craysim
             std::int32_t my_compound_camera = -1;
             for (std::int32_t ci = 0; ci < ncam; ++ci) {
                 gotoCamera (ci);
-                this->efpath = getEyeDataPath();
-                if (!this->efpath.empty()) {
+                this->efpaths.push_back (getEyeDataPath());
+                if (!this->efpaths.back().empty()) {
                     ++num_compound_cameras;
                     my_compound_camera = ci;
+                    std::cout << "my_compound_camera = " << my_compound_camera << std::endl;
+                } else {
+                    this->efpaths.pop_back();
                 }
             }
-            if (num_compound_cameras > 1) {
-                throw std::runtime_error ("This program works for only one compound eye camera in your gltf.");
-            }
+
+            this->ommatidia_datas.resize (num_compound_cameras);
+            this->ommatidias.resize (num_compound_cameras);
+
             // Now switch to our compound ray camera and set the samples per ommatidium/element
             if (my_compound_camera != -1) {
-                gotoCamera (my_compound_camera);
+                gotoCamera (0);
                 std::int32_t csamp = getCurrentEyeSamplesPerOmmatidium();
                 std::cout << "Current eye samples per ommatidium is " << csamp << std::endl;
                 if (csamp < 32000) { changeCurrentEyeSamplesPerOmmatidiumBy (samples_per_omm_default - csamp); }
@@ -307,8 +311,8 @@ export namespace craysim
 
         void setup_oces()
         {
-            // Use oces_reader to read in our eye data, esp. for the head
-            std::string oces_path = this->efpath;
+            // Use oces_reader to read in our eye data, esp. for the head. THe OCES eye must be the zeroth eye.
+            std::string oces_path = this->efpaths[0];
             mplot::tools::stripFileSuffix (oces_path);
             oces_path += ".gltf";
             // Now try to open oces_path
@@ -332,7 +336,7 @@ export namespace craysim
             this->initial_camera_space.translate (ics.translation()); // Right handed
 
             // Create an EyeVisual 'eye' in our scene
-            auto eyevm = std::make_unique<mplot::compoundray::EyeVisual<glver>> (sm::vec<>{}, &this->ommatidia_data, this->get_ommatidia_ptr(), this->get_head_mesh());
+            auto eyevm = std::make_unique<mplot::compoundray::EyeVisual<glver>> (sm::vec<>{}, &this->ommatidia_datas[0], this->get_ommatidia_ptr(0), this->get_head_mesh());
             eyevm->set_parent (this->get_id());
             eyevm->setViewMatrix (this->initial_camera_space);
             eyevm->name = "EyeVisual";
@@ -595,16 +599,19 @@ export namespace craysim
 
             std::size_t curr_eye_size = this->last_eye_size;
             // Detect changes in the camera and update eye model as necessary
-            if (this->ommatidia_data.size() == 0) {
-                if (isCompoundEyeActive()) { getCameraData (this->ommatidia_data); }
+            std::uint32_t camidx = scene->getCameraIndex();
+            if (this->ommatidia_datas[camidx].size() == 0) {
+                if (isCompoundEyeActive()) {
+                    getCameraData (this->ommatidia_datas[camidx]);
+                }
             } // else no need to re-get data
 
             // Update eyevm model (or just update colours)
-            this->eye->ommatidia = this->get_ommatidia_ptr();
-            for (auto oe : other_eyes) { oe->ommatidia = this->get_ommatidia_ptr(); }
+            this->eye->ommatidia = this->get_ommatidia_ptr(camidx);
+            for (auto oe : other_eyes) { oe->ommatidia = this->get_ommatidia_ptr(0); }
 
-            if (this->ommatidia != nullptr) {
-                curr_eye_size = this->ommatidia->size();
+            if (this->ommatidias[camidx] != nullptr) {
+                curr_eye_size = this->ommatidias[camidx]->size();
                 if (curr_eye_size != this->last_eye_size) {
                     this->eye->reinit();
                     for (auto oe : other_eyes) { oe->reinit(); }
@@ -1104,15 +1111,22 @@ export namespace craysim
             renderFrame();
             // Access data so that a brain model could be fed
             if (isCompoundEyeActive()) {
-                getCameraData (this->ommatidia_data);
-                this->ommatidia = &scene->m_ommVecs[scene->getCameraIndex()];
+                std::uint32_t camidx = scene->getCameraIndex();
+                getCameraData (this->ommatidia_datas[camidx]);
+                this->ommatidias[camidx] = &scene->m_ommVecs[camidx];
+
+                if (this->ommatidia_datas.size() > 1) {
+                    gotoCamera (1);
+                    getCameraData (this->ommatidia_datas[1]);
+                    gotoCamera (0);
+                }
 
                 // if csv mode, then save the data
-                if (this->sim_opts.all_of ({craysim::options::path_from_csv, craysim::options::save_hdf5})) {
+                if (camidx == 0 && this->sim_opts.all_of ({craysim::options::path_from_csv, craysim::options::save_hdf5})) {
                     std::cout << "Saving frame...\n";
                     std::string ommframe = "/ommatidia_data/frame_" + std::to_string (this->move_counter);
                     try {
-                        record.add_contained_vals (ommframe.c_str(), this->ommatidia_data);
+                        record.add_contained_vals (ommframe.c_str(), this->ommatidia_datas[camidx]);
                     } catch (const std::exception& e) {} // Probably didn't move this time.
                 }
             }
@@ -1129,7 +1143,7 @@ export namespace craysim
         {
             if (this->sim_opts.all_of ({craysim::options::path_from_csv, craysim::options::save_hdf5})) {
                 // convert std::vector<Ommatidium>* ommatidia into vvecs that can be h5 saved
-                auto ommat = this->get_ommatidia_ptr();
+                auto ommat = this->get_ommatidia_ptr(0);
                 sm::vvec<sm::vec<float, 3>> o_pos;
                 sm::vvec<sm::vec<float, 3>> o_dir;
                 sm::vvec<float> o_aa;
@@ -1166,9 +1180,9 @@ export namespace craysim
             this->fps_label->setupText (this->fps_profiler.fps_txt + std::string(" fr ") + std::to_string (this->move_counter));
         }
 
-        std::vector<mplot::compoundray::Ommatidium>* get_ommatidia_ptr()
+        std::vector<mplot::compoundray::Ommatidium>* get_ommatidia_ptr(std::uint32_t camidx)
         {
-            return reinterpret_cast<std::vector<mplot::compoundray::Ommatidium>*>(ommatidia);
+            return reinterpret_cast<std::vector<mplot::compoundray::Ommatidium>*>(ommatidias[camidx]);
         }
 
         mplot::meshgroup* get_head_mesh()
@@ -1249,13 +1263,13 @@ export namespace craysim
         std::string basepath = {};
         // Full path for glTF file
         std::string path = {};
-        // The eye file path, obtained from OCES file
-        std::string efpath = {};
+        // The eye file path(s)
+        std::vector<std::string> efpaths;
         // Open Compound Eye Standard reader used to access an agent head mesh (compound-ray reads the ommatidia info)
         oces::reader oces_reader;
         // Required in every craysim, I think. craysim::state? member of craysim::visual?
-        std::vector<std::array<float, 3>> ommatidia_data;
-        std::vector<Ommatidium>* ommatidia = nullptr;
+        std::vector<std::vector<std::array<float, 3>>> ommatidia_datas;
+        std::vector<std::vector<Ommatidium>*> ommatidias;
         // This is the start position of the camera as loaded from the gltf or as first located 'on the landscape'
         sm::mat<float, 4> initial_camera_space;
 
