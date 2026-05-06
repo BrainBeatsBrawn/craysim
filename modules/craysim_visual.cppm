@@ -537,7 +537,7 @@ export namespace craysim
             cam_nextloc[2] += ltstr[2]; // update only x and z
             sm::mat<float, 4> cnl;
             cnl.translate (cam_nextloc);
-            setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cnl));
+            this->set_camera_pose (cnl);
             this->move_counter = 1;
         }
 
@@ -558,8 +558,7 @@ export namespace craysim
                 // Set up our camera using the data obtained from find_triangle_hit()
                 sm::mat<float, 4> cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight);
                 if (cam_to_scene != sm::mat<float, 4>::identity()) {
-                    std::cout << "Set camera pose matrix from\n" << cam_to_scene << std::endl;
-                    setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
+                    this->set_camera_pose (cam_to_scene);
                 } else {
                     std::cout << "cam_to_scene is identity??\n";
                 }
@@ -582,8 +581,7 @@ export namespace craysim
             // reset to initial camera space if requested
             if (this->vstate.test (state::campose_reset_request) == true) {
                 this->stop(); // cancel any active movements
-                setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (this->initial_camera_space));
-
+                this->set_camera_pose (this->initial_camera_space);
                 this->setup_film_director (std::string(""));
 
                 this->clear_breadcrumbs();
@@ -594,7 +592,7 @@ export namespace craysim
                 sm::mat<float, 4> camspace = mplot::compoundray::getCameraSpace (scene);
                 auto[hp_scene, _ti0] = this->land->navmesh->find_triangle_hit (camspace, this->land_to_scene);
                 cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight);
-                setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
+                this->set_camera_pose (cam_to_scene);
                 this->vstate.reset (state::campose_reset_request);
                 // t-1 values:
                 this->tm1_ti0 = _ti0;
@@ -779,12 +777,12 @@ export namespace craysim
                 }
             }
 
-            setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
+            this->set_camera_pose (cam_to_scene);
 
             ++this->move_counter;
             this->add_breadcrumb (lastloc);
 
-            if (this->eyes[0] != nullptr) { this->eyes[0]->setViewMatrix (cam_to_scene); }
+            for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
             if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
             this->agent_coords->setViewMatrix (cam_to_scene);
         }
@@ -933,10 +931,10 @@ export namespace craysim
                     throw e;
                 }
             }
-            setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
+            this->set_camera_pose (cam_to_scene);
             this->check_reset_camspace (cam_to_scene); // if requested
             // Update the view matrix of eye and eye localspace axes
-            if (this->eyes[0] != nullptr) { this->eyes[0]->setViewMatrix (cam_to_scene); }
+            for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
             if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
             this->agent_coords->setViewMatrix (cam_to_scene);
         }
@@ -984,7 +982,7 @@ export namespace craysim
 
                     sm::mat<float, 4> cnl;
                     cnl.translate (cam_nextloc);
-                    setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cnl));
+                    this->set_camera_pose (cnl);
                     cam_to_scene = mplot::compoundray::getCameraSpace (scene);
                 }
 
@@ -1005,7 +1003,7 @@ export namespace craysim
 
 
                     if (cam_to_scene != sm::mat<float, 4>::identity()) {
-                        setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
+                        this->set_camera_pose (cam_to_scene);
                     } else { std::cout << "cam_to_scene is identity?!\n"; }
                     // else what to do if cam_to_scene is identity?
 
@@ -1032,8 +1030,8 @@ export namespace craysim
             }
 
             this->check_reset_camspace (cam_to_scene); // if requested
-            // Update the view matrix of eye and eye localspace axes
-            if (this->eyes[0] != nullptr) { this->eyes[0]->setViewMatrix (cam_to_scene); }
+            // Update the view matrix of eye and eye loc->alspace axes
+            for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
             if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
             this->agent_coords->setViewMatrix (cam_to_scene);
 
@@ -1060,8 +1058,8 @@ export namespace craysim
             dsv.read_contained_vals ("/tm1_cam_to_scene", this->tm1_cam_to_scene.arr);
             dsv.read_val ("/tm1_ti0", this->tm1_ti0);
 
-            setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (this->tm1_cam_to_scene));
-            if (this->eyes[0] != nullptr) { this->eyes[0]->setViewMatrix (this->tm1_cam_to_scene); }
+            this->set_camera_pose (this->tm1_cam_to_scene);
+            for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (this->tm1_cam_to_scene); } }
             if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (this->tm1_cam_to_scene); }
             this->agent_coords->setViewMatrix (this->tm1_cam_to_scene);
             std::cout << "First compute_mesh_movement from saved data:\n";
@@ -1074,8 +1072,8 @@ export namespace craysim
             _cam_to_scene = this->land->navmesh->compute_mesh_movement (_mv_camframe, _cam_to_scene, _land_to_scene, _hoverheight);
             std::cout << "compute_mesh_movement for time t returned!\n";
             // Set the new position for camera and ant models
-            setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (_cam_to_scene));
-            if (this->eyes[0] != nullptr) { this->eyes[0]->setViewMatrix (_cam_to_scene); }
+            this->set_camera_pose (_cam_to_scene);
+            for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (_cam_to_scene); } }
             if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (_cam_to_scene); }
             this->agent_coords->setViewMatrix (_cam_to_scene);
         }
