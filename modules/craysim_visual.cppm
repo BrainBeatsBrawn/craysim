@@ -462,6 +462,23 @@ export namespace craysim
             // Leave bc_clr/bc_alpha/bc_scale for now
         }
 
+        // Remove num breadcrumbs. For a skip-back-in-time option in csv playback (useful for film direction)
+        void remove_breadcrumbs (const std::uint32_t num)
+        {
+            if (this->breadcrumb_coords.size() >= num) {
+                this->breadcrumb_coords.erase (this->breadcrumb_coords.end() - num, this->breadcrumb_coords.end());
+            }
+            if (this->breadcrumb_data.size() >= num) {
+                this->breadcrumb_data.erase (this->breadcrumb_data.end() - num, this->breadcrumb_data.end());
+            }
+
+            if (this->bc_clr.empty() || this->bc_alpha.empty() || this->bc_scale.empty()) {
+                this->isvp->set_instance_data (this->breadcrumb_coords);
+            } else {
+                this->isvp->set_instance_data (this->breadcrumb_coords, this->bc_clr, this->bc_alpha, this->bc_scale);
+            }
+        }
+
         void add_breadcrumb (const sm::vec<>& bc_location)
         {
             if (this->isvp == nullptr) { return; }
@@ -939,6 +956,13 @@ export namespace craysim
             this->agent_coords->setViewMatrix (cam_to_scene);
         }
 
+        // Rewind num steps
+        void csv_rewind (const std::uint32_t num)
+        {
+            if (this->move_counter >= num) { this->move_counter -= num; }
+            this->remove_breadcrumbs (num);
+        }
+
         bool csv_playback()
         {
             bool rtn = true;
@@ -1121,6 +1145,11 @@ export namespace craysim
             this->instantaneous_velocity = {}; // velocity computed per render cycle
 
             this->agent_coords->setHide (!this->vstate.test(craysim::visual<glver>::state::show_camframe));
+
+            if (this->sim_opts.test (craysim::options::path_from_csv) && this->vstate.test (craysim::visual<glver>::state::rewind)) {
+                this->csv_rewind (500);
+                this->vstate.reset (craysim::visual<glver>::state::rewind);
+            }
 
             // Any of the following movement-creating functions will set the instantaneous velocity
             //
@@ -1400,13 +1429,14 @@ export namespace craysim
         // The instantaneous velocity arising from the last movement
         sm::vec<float> instantaneous_velocity = {};
 
-        enum class state : uint8_t {
+        enum class state : uint32_t {
             show_cones,            // Parameter for EyeVisual. Draw simple flared tubes in mathplot window
             campose_reset_request, // A request to reset the pose of the camera
             show_camframe,         // Show camera axes?
             paused,                // Pause sim (i.e. pause time)?
             stepfwd,               // If true and if paused is true, step forward one timestep in the camera input
             walk,                  // If true, do a random walk
+            rewind,                // user has asked to rewind N steps in some process (such as csv_playback)
             freeze                 // Freeze movement
         };
         sm::flags<state> vstate;
@@ -1547,7 +1577,7 @@ export namespace craysim
                 } else if (key == mplot::key::home) {
                     this->kcmd_speed = this->kcmd_speed * 2.0f;
                     std::cout << "Speed increased to " << this->kcmd_speed  << "m/s" << std::endl;
-                } else if (key == mplot::key::r) {
+                } else if (key == mplot::key::r && (mods & mplot::keymod::shift)) {
                     this->stop();
                     this->vstate.set (state::campose_reset_request);
                 }
@@ -1602,6 +1632,9 @@ export namespace craysim
 
                 } else if (key == mplot::key::space) {
                     this->vstate.flip (state::paused);
+
+                } else if (key == mplot::key::r && !(mods & mplot::keymod::shift)) {
+                    this->vstate.set (state::rewind);
 
                 } else if (key == mplot::key::page_up) {
                     int csamp = getCurrentEyeSamplesPerOmmatidium();
