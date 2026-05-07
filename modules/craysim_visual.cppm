@@ -419,23 +419,23 @@ export namespace craysim
                         std::uint32_t t = c.get<std::uint32_t>("event_time", 0);
                         std::string et = c.get<std::string>("event_type", "unknown");
 
+                        this->directions[t] = mplot::direction_data();
+                        this->directions[t].transform_time_frames = c.get<std::uint32_t> ("transform_time_frames", 0u);
+                        this->directions[t].transform_time = c.get<float> ("transform_time", 1.0f);
+
                         if (et == "sceneview") {
-                            this->directions[t] = mplot::direction_data();
                             this->directions[t].sceneview = c.get_vec<float, 16> ("sceneview");
                             this->directions[t].event = mplot::direction_event::sceneview;
                         } else if (et == "timed_translation") {
-                            this->directions[t] = mplot::direction_data();
                             this->directions[t].translation = c.get_vec<float, 3> ("translation");
-                            this->directions[t].transform_time_frames = c.get<std::uint32_t> ("transform_time_frames", 0u);
-                            this->directions[t].transform_time = c.get<float> ("transform_time", 1.0f);
                             this->directions[t].event = mplot::direction_event::timed_translation;
                         } else if (et == "timed_rotation") {
-                            this->directions[t] = mplot::direction_data();
                             this->directions[t].about_vert_angle = c.get<float> ("about_vert_angle_degrees", 0.0f) * sm::mathconst<float>::deg2rad;
                             this->directions[t].tilt_angle = c.get<float> ("tilt_angle_degrees", 0.0f) * sm::mathconst<float>::deg2rad;
-                            this->directions[t].transform_time_frames = c.get<std::uint32_t> ("transform_time_frames", 0u);
-                            this->directions[t].transform_time = c.get<float> ("transform_time", 1.0f);
                             this->directions[t].event = mplot::direction_event::timed_rotation;
+                        } else if (et == "timed_transform") {
+                            this->directions[t].sceneview = c.get_vec<float, 16> ("sceneview");
+                            this->directions[t].event = mplot::direction_event::timed_transform;
                         } else {
                             std::cout << "Unknown event type\n";
                         }
