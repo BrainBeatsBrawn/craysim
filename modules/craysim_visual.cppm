@@ -353,7 +353,7 @@ export namespace craysim
             eyevm->name = "EyeVisual";
             eyevm->finalize();
             this->eyes[0] = this->addVisualModel (eyevm);
-            // This eye is the followed VM.
+            // This eye is the followed VM. If you teleport somewhere (such as with csv_playback) you have to call this again.
             this->setFollowedVM (this->eyes[0]);
         }
 
@@ -1004,7 +1004,7 @@ export namespace craysim
 
                     if (cam_to_scene != sm::mat<float, 4>::identity()) {
                         this->set_camera_pose (cam_to_scene);
-                    } else { std::cout << "cam_to_scene is identity?!\n"; }
+                    } else { std::cout << "csv_playback: cam_to_scene is identity?!\n"; }
                     // else what to do if cam_to_scene is identity?
 
                     // Now we have moved, can compute instantaneous velocity
@@ -1034,6 +1034,12 @@ export namespace craysim
             for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
             if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
             this->agent_coords->setViewMatrix (cam_to_scene);
+
+            // Update eyes[0]
+            if ((this->move_counter - 1) == 1) {
+                std::cout << "Update initial vm last locn\n";
+                this->setFollowedVM (this->eyes[0]);
+            }
 
             return rtn;
         };
