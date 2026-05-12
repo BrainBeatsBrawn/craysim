@@ -60,6 +60,7 @@ export namespace craysim
         api_movement,     // Client code sets a vec/quat or mat for movement in the next render_and_poll()
         homing_mode,      // A flag for a 'go home' mode. It's up to client code to decide what to do with this.
         have_film_director, // user passed a json config file for film direction
+        making_movie,      // If true, we're making a movie
         save_hdf5,        // If true, then save any output data in HDF5 (active in 'path_from_csv' mode)
         debug_mv,         // Open a debug h5 file (craysim.h5) and run compute_mesh_movement once for debug of NavMesh
         can_exit          // If set, program can exit now
@@ -201,6 +202,7 @@ export namespace craysim
             : mplot::Visual<glver> (width, height, title)
         {
             this->sim_opts = prog_opts.opts;
+            this->sim_opts.set (craysim::options::making_movie, prog_opts.make_movie);
 
             // Boilerplate memory alloc for compound-ray and turn off verbose logging.
             multicamAlloc(); setVerbosity (false);
@@ -1027,6 +1029,7 @@ export namespace craysim
                 }
 
             } else { // no more movements
+                std::cout << "csv_playback: no more movements\n";
                 rtn = false;
             }
 
@@ -1138,7 +1141,16 @@ export namespace craysim
                     this->walk_over_land();
                 } else if (this->sim_opts.test (craysim::options::path_from_csv) && this->csv_positions.size() > this->move_counter) {
                     // Construct path from csv file of 2D agent locations
-                    this->csv_playback();
+                    if (this->csv_playback() == false && this->sim_opts.test (craysim::options::making_movie)) {
+                        // In movie mode, finish as soon as the movie is made
+                        this->signal_to_quit();
+                    }
+                } else if (this->sim_opts.test (craysim::options::path_from_csv)
+                           && this->csv_positions.size() <= this->move_counter
+                           && this->sim_opts.test (craysim::options::making_movie)) {
+                    std::cout << "Ran out of moves making movies, signal to quit\n";
+                    this->signal_to_quit();
+
                 } else if (this->sim_opts.any_of ({craysim::options::api_movement, craysim::options::homing_mode})) {
                     // React to movements commanded by vec/quaternion or transformation matrix
                     // (i.e. by client code).
