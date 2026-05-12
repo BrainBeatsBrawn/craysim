@@ -53,6 +53,7 @@ export namespace craysim
         bool draw_simple_head = false;
         bool draw_antennae = true;
         bool draw_body = true;
+        bool draw_ring = true;
 
         void initializeVertices()
         {
@@ -135,6 +136,15 @@ export namespace craysim
                                         mplot::colour::ivoryblack,
                                         mplot::colour::sepia,
                                         conf.get_vec<float, 3>("abdomen_abc"), nring, nseg, abdomen_tr);
+            }
+
+            if (this->draw_ring) {
+                float rd = conf.get<float>("ring_diameter", 0.025f);
+                sm::mat<float, 4> tfm;
+                tfm.translate (sm::vec<>{0,0.025,0});
+                tfm.rotate (sm::vec<>::ux(), sm::mathconst<float>::pi_over_2);
+                this->computeRing (conf.get_vec<float, 3>("head_loc"),
+                                   mplot::colour::floralwhite, rd, rd / 10.0f, 50, tfm);
             }
         }
     };
