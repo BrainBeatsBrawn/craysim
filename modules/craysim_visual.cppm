@@ -559,6 +559,7 @@ export namespace craysim
                 sm::mat<float, 4> cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight);
                 if (cam_to_scene != sm::mat<float, 4>::identity()) {
                     this->set_camera_pose (cam_to_scene);
+                    std::cout << "Camera/agent pose in scene coordinates: " << (cam_to_scene * sm::vec<>{}) << std::endl;
                 } else {
                     std::cout << "cam_to_scene is identity??\n";
                 }
