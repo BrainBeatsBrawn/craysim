@@ -349,7 +349,7 @@ export namespace craysim
             auto eyevm = std::make_unique<mplot::compoundray::EyeVisual<glver>> (sm::vec<>{},
                                                                                  &this->ommatidia_datas[0],
                                                                                  this->get_ommatidia_ptr(0),
-                                                                                 this->get_head_mesh(0));
+                                                                                 this->get_head_mesh(0), true); // true: zero_eye
             eyevm->set_parent (this->get_id());
             eyevm->setViewMatrix (this->initial_camera_space);
             eyevm->name = "EyeVisual";
