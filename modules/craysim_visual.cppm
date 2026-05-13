@@ -1658,7 +1658,7 @@ export namespace craysim
         if (v.oces_reader.contains (camidx) && v.oces_reader[camidx].read_success == true) {
             sz = v.oces_reader[camidx].position.size();
             ps_rad = 0.0002f;
-            centre = { -0.00056, 0.00005, -0.00005 };
+            centre = { -0.00056, 0.0007, -0.00006 };
         }
 
         sm::mat<float, 4> twod_tr;                            // twod projection transformation
