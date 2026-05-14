@@ -349,7 +349,7 @@ export namespace craysim
             auto eyevm = std::make_unique<mplot::compoundray::EyeVisual<glver>> (sm::vec<>{},
                                                                                  &this->ommatidia_datas[0],
                                                                                  this->get_ommatidia_ptr(0),
-                                                                                 this->get_head_mesh(0), true); // true: zero_eye
+                                                                                 this->get_head_mesh(0));
             eyevm->set_parent (this->get_id());
             eyevm->setViewMatrix (this->initial_camera_space);
             eyevm->name = "EyeVisual";
@@ -1658,7 +1658,7 @@ export namespace craysim
         if (v.oces_reader.contains (camidx) && v.oces_reader[camidx].read_success == true) {
             sz = v.oces_reader[camidx].position.size();
             ps_rad = 0.0002f;
-            centre = { -0.00056, 0.0007, -0.00006 };
+            centre = { -0.00054, -0.00009, -0.00002 };
         }
 
         sm::mat<float, 4> twod_tr;                            // twod projection transformation
