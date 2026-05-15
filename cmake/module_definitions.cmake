@@ -5,6 +5,8 @@ macro(setup_module_variables_for_craysim_maths maths_directory json_directory)
   set(CRAYSIM_MATHS_MODULES
     ${maths_directory}/sm/hdfdata.cppm
     ${maths_directory}/sm/config.cppm
+    ${maths_directory}/sm/spline.cppm
+    ${maths_directory}/sm/random_walk.cppm
     ${json_directory}/src/modules/json.cppm
   )
   set(CRAYSIM_MATHS_DOUBLEHEX_MODULES
@@ -46,9 +48,7 @@ endmacro()
 
 macro(setup_module_variables_for_craysim base_directory)
   set(CRAYSIM_MODULES
-    ${base_directory}/modules/tk_spline.cppm           # GPL v2
-    ${base_directory}/modules/craysim_random_walk.cppm # Uses tk_spline, GPL v2
-    ${base_directory}/modules/craysim_visual.cppm      # Uses random_walk, GPL v2
+    ${base_directory}/modules/craysim_visual.cppm
   )
   set(CRAYSIM_DOUBLEHEX_MODULES
     ${base_directory}/modules/craysim_doublehexgrid.cppm

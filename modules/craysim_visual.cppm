@@ -38,7 +38,7 @@ export import mplot.visual;
 export import mplot.fps.profiler;
 export import oces.reader;
 
-import craysim.random_walk;
+import sm.random_walk;
 
 // Reproduce controller functions for the mplot window for ease of use
 export namespace craysim
@@ -453,7 +453,7 @@ export namespace craysim
 
         void setup_random_walk (const std::uint32_t _n_steps = 1500, const std::uint32_t _a_tau = 150, const float _kappa = 100, const float _a_max = 100)
         {
-            this->rrg = std::make_unique<craysim::random_walk<float>>(_n_steps, _a_tau, _kappa, _a_max);
+            this->rrg = std::make_unique<sm::random_walk<float>>(_n_steps, _a_tau, _kappa, _a_max);
         }
 
         void clear_breadcrumbs()
@@ -1387,7 +1387,7 @@ export namespace craysim
         float hoverheight = 0.01f;
 
         // Random route generation object
-        std::unique_ptr<craysim::random_walk<float>> rrg;
+        std::unique_ptr<sm::random_walk<float>> rrg;
 
         // For debug saving and computation of instantaneous velocity
         sm::mat<float, 4> tm1_cam_to_scene;
