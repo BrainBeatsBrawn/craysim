@@ -376,6 +376,8 @@ export namespace craysim
             isv->set_parent (this->get_id());
             isv->max_instances = max_bc;
             isv->radiusFixed = 0.004f;
+            isv->marker_offset = isv->radiusFixed;
+            isv->marker_offset_dirn = sm::vec<>::uy();
             isv->finalize();
             this->isvp = this->addVisualModel (isv);
         }
@@ -1366,7 +1368,7 @@ export namespace craysim
         // Skip some add_breadcrumb calls with this
         std::uint32_t breadcrumb_every = 1u;
         // Overall size multiplier for breadcrumbs
-        float bc_mult = 2.0f;
+        float bc_mult = 1.0f;
 
         // Client code gives us names of the navigation landscape. If we find the landscape, store a pointer to it with this
         mplot::VisualModel<glver>* land = nullptr;
@@ -1569,6 +1571,11 @@ export namespace craysim
                 } else if (key == mplot::key::r) {
                     this->stop();
                     this->vstate.set (state::campose_reset_request);
+                } else if (key == mplot::key::insert) {
+                    this->bc_mult += 0.2f;
+                } else if (key == mplot::key::delete_key) {
+                    this->bc_mult -= 0.2f;
+                    if (this->bc_mult < 0.0f) { this->bc_mult = 0.0f; }
                 }
 
             } else if (action == mplot::keyaction::release && !(mods & mplot::keymod::shift)) {
