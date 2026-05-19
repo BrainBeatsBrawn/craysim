@@ -1325,7 +1325,7 @@ export namespace craysim
         // A member fps_profiler
         mplot::fps::profiler fps_profiler;
         // The FPS label, accessible to client code
-        mplot::VisualTextModel<glver>* fps_label;
+        mplot::VisualTextModel<glver>* fps_label = nullptr;
         // Base path for glTF file of the scene
         std::string basepath = {};
         // Full path for glTF file of the scene
@@ -1351,9 +1351,9 @@ export namespace craysim
         std::map<std::uint32_t, std::vector<mplot::compoundray::EyeVisual<glver>*>> other_eyes;
 
         // You may have a VisualModel of an 'agent body' to go along with your EyeVisual
-        mplot::VisualModel<glver>* agent_body;
+        mplot::VisualModel<glver>* agent_body = nullptr;
         // A coordinate arrow frame to show location of compound-ray eye(s)/agent_body (in case they are tiny)
-        mplot::CoordArrows<glver>* agent_coords;
+        mplot::CoordArrows<glver>* agent_coords = nullptr;
 
         // Visualization of a breadcrumb trail
         mplot::InstancedScatterVisual<glver>* isvp = nullptr;
