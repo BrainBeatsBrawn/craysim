@@ -424,8 +424,10 @@ export namespace craysim
                         std::string et = c.get<std::string>("event_type", "unknown");
 
                         this->directions[t] = mplot::direction_data();
+                        this->directions[t].id = t;
                         this->directions[t].transform_time_frames = c.get<std::uint32_t> ("transform_time_frames", 0u);
                         this->directions[t].transform_time = c.get<float> ("transform_time", 1.0f);
+                        this->directions[t].min_jerk = c.get<bool> ("min_jerk", true);
 
                         if (et == "sceneview") {
                             this->directions[t].sceneview = c.get_vec<float, 16> ("sceneview");
