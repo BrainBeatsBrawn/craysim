@@ -6,6 +6,8 @@ macro(setup_module_variables_for_craysim_maths maths_directory json_directory)
     ${maths_directory}/sm/hdfdata.cppm
     ${maths_directory}/sm/config.cppm
     ${maths_directory}/sm/spline.cppm
+    ${maths_directory}/sm/winder.cppm
+    ${maths_directory}/sm/geometry.cppm
     ${maths_directory}/sm/random_walk.cppm
     ${json_directory}/src/modules/json.cppm
   )
@@ -33,6 +35,7 @@ macro(setup_module_variables_for_craysim_mathplot base_directory)
     ${base_directory}/mplot/fps/profiler.cppm
     ${base_directory}/mplot/compoundray/interop.cppm
     ${base_directory}/mplot/compoundray/Ommatidium.cppm
+    ${base_directory}/mplot/jcvoronoi/jc_voronoi.cppm
     ${base_directory}/mplot/compoundray/EyeVisual.cppm
     ${base_directory}/mplot/VerticesVisual.cppm
     ${base_directory}/mplot/NormalsVisual.cppm
