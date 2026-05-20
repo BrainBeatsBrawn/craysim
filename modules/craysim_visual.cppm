@@ -330,7 +330,8 @@ export namespace craysim
                 } else {
                     std::cout << "Success loading OCES file " << oces_path << "\n";
                     // Read the head and make a VisualModel
-                    oces_reader[efp.first].head_mesh.single_colour = {0.345f, 0.122f, 0.082f};
+                    constexpr float gam = 2.222222222222222f;
+                    oces_reader[efp.first].head_mesh.single_colour = {std::pow (0.345f, gam), std::pow (0.122f, gam), std::pow (0.082f, gam)};
                     break;
                 }
             }
