@@ -63,6 +63,8 @@ export namespace craysim
         making_movie,      // If true, we're making a movie
         save_hdf5,        // If true, then save any output data in HDF5 (active in 'path_from_csv' mode)
         debug_mv,         // Open a debug h5 file (craysim.h5) and run compute_mesh_movement once for debug of NavMesh
+        show_fps,         // If true, show the FPS in the fps_label
+        show_movenum,     // If true, show the current movement counter in the fps_label
         can_exit          // If set, program can exit now
     };
 
@@ -234,7 +236,7 @@ export namespace craysim
 
             this->load (prog_opts.gltf_path);
             // Use a FPS profiling with a text object on screen
-            this->addLabel ("0 FPS", {0.63f, -0.43f, 0.0f}, this->fps_label);
+            this->addLabel ("", {0.36f, -0.22f, -0.1f}, this->fps_label);
             this->setup_camera();
             this->setup_oces();
             this->setup_eyevisual();
@@ -427,7 +429,6 @@ export namespace craysim
                         this->directions[t] = mplot::direction_data();
                         this->directions[t].id = t;
                         this->directions[t].transform_time_frames = c.get<std::uint32_t> ("transform_time_frames", 0u);
-                        this->directions[t].transform_time = c.get<float> ("transform_time", 1.0f);
                         this->directions[t].min_jerk = c.get<bool> ("min_jerk", true);
 
                         if (et == "sceneview") {
@@ -443,6 +444,11 @@ export namespace craysim
                         } else if (et == "timed_transform") {
                             this->directions[t].sceneview = c.get_vec<float, 16> ("sceneview");
                             this->directions[t].event = mplot::direction_event::timed_transform;
+                        } else if (et == "timed_orbit") {
+                            this->directions[t].orbit_axis = c.get_vec<float, 3> ("orbit_axis");
+                            this->directions[t].orbit_centre = c.get_vec<float, 3> ("orbit_centre");
+                            this->directions[t].orbit_angle = c.get<float> ("orbit_angle", 360.0f) * sm::mathconst<float>::deg2rad;
+                            this->directions[t].event = mplot::direction_event::timed_orbit;
                         } else {
                             std::cout << "Unknown event type\n";
                         }
@@ -959,10 +965,6 @@ export namespace craysim
                     this->setCurrentDirectionEvent (this->directions[this->move_counter]);
                 }
 
-                if (this->move_counter && (this->move_counter % 500) == 0) {
-                    std::cout << "CSV Playback move " << this->move_counter << "...\n";
-                }
-
                 /*
                  * With a csv path, teleport between each location (and then estimate the heading of
                  * the ant, or use csv_dirns). CSV positions are relative to the landscape model.
@@ -1118,7 +1120,7 @@ export namespace craysim
             // Now render the mathplot window
             this->render();
             // Change label after render (it needs v's context, not any of the other windows)
-            if (this->move_counter % 33 == 0) { this->fps_label_update(); }
+            if (this->move_counter % this->fps_label_update_period == 0) { this->fps_label_update(); }
 
             // Save some electricity while developing - limit to 60 FPS. For max speed use this->poll() (-x)
             if (this->sim_opts.test (craysim::options::max_fps)) { this->poll(); } else { this->wait (this->frame_tau); }
@@ -1245,7 +1247,11 @@ export namespace craysim
 
         void fps_label_update()
         {
-            this->fps_label->setupText (this->fps_profiler.fps_txt + std::string(" fr ") + std::to_string (this->move_counter));
+            std::string lstr = {};
+            if (sim_opts.test (craysim::options::show_fps)) { lstr += this->fps_profiler.fps_txt; }
+            if (sim_opts.test (craysim::options::show_fps) && sim_opts.test (craysim::options::show_movenum)) { lstr += " "; }
+            if (sim_opts.test (craysim::options::show_movenum)) { lstr += std::to_string (this->move_counter); }
+            this->fps_label->setupText (lstr);
         }
 
         std::vector<mplot::compoundray::Ommatidium>* get_ommatidia_ptr (const std::uint32_t camidx)
@@ -1325,8 +1331,10 @@ export namespace craysim
         sm::flags<craysim::options> sim_opts;
         // A member fps_profiler
         mplot::fps::profiler fps_profiler;
-        // The FPS label, accessible to client code
+        // The FPS label, accessible to client code. Can be used for FPS, frame number or a combination. Set options.
         mplot::VisualTextModel<glver>* fps_label = nullptr;
+        // How often to update the label?
+        std::uint64_t fps_label_update_period = 33u;
         // Base path for glTF file of the scene
         std::string basepath = {};
         // Full path for glTF file of the scene
