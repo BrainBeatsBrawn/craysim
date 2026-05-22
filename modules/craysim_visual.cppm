@@ -60,7 +60,8 @@ export namespace craysim
         api_movement,     // Client code sets a vec/quat or mat for movement in the next render_and_poll()
         homing_mode,      // A flag for a 'go home' mode. It's up to client code to decide what to do with this.
         have_film_director, // user passed a json config file for film direction
-        making_movie,      // If true, we're making a movie
+        making_movie,     // If true, we're making a movie
+        no_follow_agent,  // If true DON'T follow the agent (for some movies, this is useful)
         save_hdf5,        // If true, then save any output data in HDF5 (active in 'path_from_csv' mode)
         debug_mv,         // Open a debug h5 file (craysim.h5) and run compute_mesh_movement once for debug of NavMesh
         show_fps,         // If true, show the FPS in the fps_label
@@ -77,6 +78,8 @@ export namespace craysim
         std::string csv_path = {};
         std::string h5_path = {};
         std::string hovh = {};
+        std::int32_t w = -1; // user-requested width
+        std::int32_t h = -1;
         bool make_movie = false;
     };
 
@@ -92,6 +95,8 @@ export namespace craysim
                 rtn.opts |= craysim::options::can_exit;
             } else if (arg == "-f") {
                 rtn.gltf_path = std::string(argv[++i]);
+            } else if (arg == "-F") {
+                rtn.opts |= craysim::options::no_follow_agent;
             } else if (arg == "-b") {
                 rtn.opts |= craysim::options::blender_axes;
             } else if (arg == "-x") {
@@ -104,8 +109,18 @@ export namespace craysim
                 rtn.opts |= craysim::options::have_film_director;
                 i++;
                 rtn.film_director_path = std::string(argv[i]);
-            } else if (arg == "-d") {
+            } else if (arg == "-5") {
                 rtn.opts |= craysim::options::save_hdf5;
+            } else if (arg == "-d") {
+                // Get width and height
+                std::string wxh_str = std::string(argv[++i]);
+                std::cout << "cmd str: " << wxh_str << std::endl;
+                std::vector<std::string> wxh_v = mplot::tools::stringToVector (wxh_str, "x");
+                if (wxh_v.size() > 1) {
+                    rtn.w = std::stoi (wxh_v[0]);
+                    rtn.h = std::stoi (wxh_v[1]);
+                }
+                std::cout << "Got w=" << rtn.w << ", h=" << rtn.h << std::endl;
             } else if (arg == "-g") {
                 rtn.opts |= craysim::options::debug_mv;
             } else if (arg == "-H") {
@@ -231,12 +246,16 @@ export namespace craysim
                 this->setSceneRotation (def_q);
             }
 
-            // We follow the agent as it moves by default.
-            this->options.set (mplot::visual_options::viewFollowsVMTranslations);
+            // We follow the agent as it moves by default, but craysim has a 'don't follow' option
+            if (this->sim_opts.test (craysim::options::no_follow_agent)) {
+                this->options.set (mplot::visual_options::viewFollowsVMTranslations, false);
+            } else {
+                this->options.set (mplot::visual_options::viewFollowsVMTranslations, true);
+            }
 
             this->load (prog_opts.gltf_path);
             // Use a FPS profiling with a text object on screen
-            this->addLabel ("", {0.36f, -0.22f, -0.1f}, this->fps_label);
+            this->addLabel ("", {0.36f, 0.0f, -0.1f}, this->fps_label);
             this->setup_camera();
             this->setup_oces();
             this->setup_eyevisual();
