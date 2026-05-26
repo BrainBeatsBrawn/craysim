@@ -1,24 +1,32 @@
 #
 # Define variables of module groups for use by client projects.
 #
-macro(setup_module_variables_for_craysim_maths base_directory)
+macro(setup_module_variables_for_craysim_maths maths_directory json_directory)
   set(CRAYSIM_MATHS_MODULES
-    ${base_directory}/sm/hdfdata.cppm
+    ${maths_directory}/sm/hdfdata.cppm
+    ${maths_directory}/sm/config.cppm
+    ${maths_directory}/sm/spline.cppm
+    ${maths_directory}/sm/winder.cppm
+    ${maths_directory}/sm/geometry.cppm
+    ${maths_directory}/sm/random_walk.cppm
+    ${json_directory}/src/modules/json.cppm
   )
   set(CRAYSIM_MATHS_DOUBLEHEX_MODULES
-    ${base_directory}/sm/hdfdata.cppm
-    ${base_directory}/sm/binomial.cppm
-    ${base_directory}/sm/nm_simplex.cppm
-    ${base_directory}/sm/bezcoord.cppm
-    ${base_directory}/sm/bezcurve.cppm
-    ${base_directory}/sm/bezcurvepath.cppm
-    ${base_directory}/sm/hex.cppm
-    ${base_directory}/sm/hexgrid.cppm
-    ${base_directory}/sm/hexgrid_hdf.cppm
+    ${maths_directory}/sm/hdfdata.cppm
+    ${maths_directory}/sm/config.cppm
+    ${json_directory}/src/modules/json.cppm
+    ${maths_directory}/sm/binomial.cppm
+    ${maths_directory}/sm/nm_simplex.cppm
+    ${maths_directory}/sm/bezcoord.cppm
+    ${maths_directory}/sm/bezcurve.cppm
+    ${maths_directory}/sm/bezcurvepath.cppm
+    ${maths_directory}/sm/hex.cppm
+    ${maths_directory}/sm/hexgrid.cppm
+    ${maths_directory}/sm/hexgrid_hdf.cppm
   )
   set(CRAYSIM_MATHS_ANTBODY_MODULES
-    ${base_directory}/sm/config.cppm
-    ${base_directory}/json/src/modules/json.cppm
+    ${maths_directory}/sm/config.cppm
+    ${json_directory}/src/modules/json.cppm
   )
 endmacro()
 
@@ -43,9 +51,7 @@ endmacro()
 
 macro(setup_module_variables_for_craysim base_directory)
   set(CRAYSIM_MODULES
-    ${base_directory}/modules/tk_spline.cppm           # GPL v2
-    ${base_directory}/modules/craysim_random_walk.cppm # Uses tk_spline, GPL v2
-    ${base_directory}/modules/craysim_visual.cppm      # Uses random_walk, GPL v2
+    ${base_directory}/modules/craysim_visual.cppm
   )
   set(CRAYSIM_DOUBLEHEX_MODULES
     ${base_directory}/modules/craysim_doublehexgrid.cppm

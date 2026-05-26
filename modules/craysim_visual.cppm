@@ -6,10 +6,10 @@ module;
 #include <vector>
 #include <array>
 #include <memory>
-#include <span>
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 
 #include <MulticamScene.h>
 #include <libEyeRenderer.h> // getCurrentEyeSamplesPerOmmatidium
@@ -26,6 +26,7 @@ import sm.mat;
 import sm.hdfdata;
 import sm.algo;
 import sm.geometry;
+import sm.config;
 
 import mplot.tools;
 import mplot.compoundray.interop; // mathplot <--> compoundray interoperability
@@ -40,7 +41,7 @@ export import mplot.visual;
 export import mplot.fps.profiler;
 export import oces.reader;
 
-import craysim.random_walk;
+import sm.random_walk;
 
 // Reproduce controller functions for the mplot window for ease of use
 export namespace craysim
@@ -61,9 +62,13 @@ export namespace craysim
         path_from_csv,    // Move the agent from a pre-defined sequence of 2D coordinates that give it a path
         api_movement,     // Client code sets a vec/quat or mat for movement in the next render_and_poll()
         homing_mode,      // A flag for a 'go home' mode. It's up to client code to decide what to do with this.
-        have_json_config, // user passed a json config file
+        have_film_director, // user passed a json config file for film direction
+        making_movie,     // If true, we're making a movie
+        no_follow_agent,  // If true DON'T follow the agent (for some movies, this is useful)
         save_hdf5,        // If true, then save any output data in HDF5 (active in 'path_from_csv' mode)
         debug_mv,         // Open a debug h5 file (craysim.h5) and run compute_mesh_movement once for debug of NavMesh
+        show_fps,         // If true, show the FPS in the fps_label
+        show_movenum,     // If true, show the current movement counter in the fps_label
         can_exit          // If set, program can exit now
     };
 
@@ -72,10 +77,12 @@ export namespace craysim
     {
         sm::flags<craysim::options> opts;
         std::string gltf_path = {};
-        std::string config_path = {};
+        std::string film_director_path = {};
         std::string csv_path = {};
         std::string h5_path = {};
         std::string hovh = {};
+        std::int32_t w = -1; // user-requested width
+        std::int32_t h = -1;
         bool make_movie = false;
     };
 
@@ -91,6 +98,8 @@ export namespace craysim
                 rtn.opts |= craysim::options::can_exit;
             } else if (arg == "-f") {
                 rtn.gltf_path = std::string(argv[++i]);
+            } else if (arg == "-F") {
+                rtn.opts |= craysim::options::no_follow_agent;
             } else if (arg == "-b") {
                 rtn.opts |= craysim::options::blender_axes;
             } else if (arg == "-x") {
@@ -100,15 +109,27 @@ export namespace craysim
                 i++;
                 rtn.csv_path = std::string(argv[i]);
             } else if (arg == "-j") {
-                rtn.opts |= craysim::options::have_json_config;
+                rtn.opts |= craysim::options::have_film_director;
                 i++;
-                rtn.config_path = std::string(argv[i]);
-            } else if (arg == "-d") {
+                rtn.film_director_path = std::string(argv[i]);
+            } else if (arg == "-5") {
                 rtn.opts |= craysim::options::save_hdf5;
+            } else if (arg == "-d") {
+                // Get width and height
+                std::string wxh_str = std::string(argv[++i]);
+                std::cout << "cmd str: " << wxh_str << std::endl;
+                std::vector<std::string> wxh_v = mplot::tools::stringToVector (wxh_str, "x");
+                if (wxh_v.size() > 1) {
+                    rtn.w = std::stoi (wxh_v[0]);
+                    rtn.h = std::stoi (wxh_v[1]);
+                }
+                std::cout << "Got w=" << rtn.w << ", h=" << rtn.h << std::endl;
             } else if (arg == "-g") {
                 rtn.opts |= craysim::options::debug_mv;
             } else if (arg == "-H") {
                 rtn.hovh = std::string(argv[++i]);
+            } else if (arg == "-m") {
+                rtn.make_movie = true;
             }
         }
         if (rtn.gltf_path.empty()) {
@@ -116,7 +137,10 @@ export namespace craysim
             rtn.opts |= craysim::options::can_exit;
         }
 
-        rtn.h5_path = rtn.csv_path;
+
+        // If csv_path had commas in it, then just use the first one.
+        std::vector<std::string> cpaths = mplot::tools::stringToVector (rtn.csv_path, ",");
+        if (!cpaths.empty()) { rtn.h5_path = cpaths[0]; }
         mplot::tools::stripFileSuffix (rtn.h5_path);
         if (rtn.h5_path.empty()) { rtn.h5_path = "trail"; }
         rtn.h5_path += ".h5";
@@ -198,6 +222,7 @@ export namespace craysim
             : mplot::Visual<glver> (width, height, title)
         {
             this->sim_opts = prog_opts.opts;
+            this->sim_opts.set (craysim::options::making_movie, prog_opts.make_movie);
 
             // Boilerplate memory alloc for compound-ray and turn off verbose logging.
             multicamAlloc(); setVerbosity (false);
@@ -224,18 +249,40 @@ export namespace craysim
                 this->setSceneRotation (def_q);
             }
 
-            // We follow the agent as it moves by default.
-            this->options.set (mplot::visual_options::viewFollowsVMTranslations);
+            // We follow the agent as it moves by default, but craysim has a 'don't follow' option
+            if (this->sim_opts.test (craysim::options::no_follow_agent)) {
+                this->options.set (mplot::visual_options::viewFollowsVMTranslations, false);
+            } else {
+                this->options.set (mplot::visual_options::viewFollowsVMTranslations, true);
+            }
 
             this->load (prog_opts.gltf_path);
             // Use a FPS profiling with a text object on screen
-            this->addLabel ("0 FPS", {0.63f, -0.43f, 0.0f}, this->fps_label);
+            this->addLabel ("", {0.36f, 0.0f, -0.1f}, this->fps_label);
             this->setup_camera();
             this->setup_oces();
             this->setup_eyevisual();
             this->setup_breadcrumbs (1000u); // default 1000 breadcrumbs
             this->setup_agent_coords();
             this->setup_compass_coords();
+
+            // For json film direction, first try a path based on any csv path we have
+            if (prog_opts.film_director_path.empty() && !prog_opts.csv_path.empty()) {
+                // If csv_path had commas in it, then just use the first one.
+                std::vector<std::string> cpaths = mplot::tools::stringToVector (prog_opts.csv_path, ",");
+                // Construct json path from csv path and try that
+                std::string candidate_json = "";
+                if (!cpaths.empty()) { candidate_json = cpaths[0]; }
+                mplot::tools::stripFileSuffix (candidate_json);
+                candidate_json += ".json";
+                std::cout << "Attempt to open csv's partner json: " << candidate_json << std::endl;
+                this->setup_film_director (candidate_json);
+
+            } else {
+                if (!prog_opts.film_director_path.empty()) {
+                    this->setup_film_director (prog_opts.film_director_path);
+                }
+            }
 
             this->record.init (prog_opts.h5_path, std::ios::out | std::ios::trunc);
         }
@@ -264,42 +311,54 @@ export namespace craysim
         {
             // We get the eye data path from the glTF file
             std::int32_t ncam = static_cast<std::int32_t>(getCameraCount());
-            std::int32_t num_compound_cameras = 0;
             std::int32_t my_compound_camera = -1;
             for (std::int32_t ci = 0; ci < ncam; ++ci) {
                 gotoCamera (ci);
-                this->efpath = getEyeDataPath();
-                if (!this->efpath.empty()) {
-                    ++num_compound_cameras;
+                this->efpaths[ci] = getEyeDataPath();
+                if (!this->efpaths[ci].empty()) {
                     my_compound_camera = ci;
+                    std::cout << "my_compound_camera = " << my_compound_camera << std::endl;
                 }
             }
-            if (num_compound_cameras > 1) {
-                throw std::runtime_error ("This program works for only one compound eye camera in your gltf.");
-            }
-            // Now switch to our compound ray camera and set the samples per ommatidium/element
+
+            // Now switch to each compound ray camera and set the samples per ommatidium/element
             if (my_compound_camera != -1) {
-                gotoCamera (my_compound_camera);
+                gotoCamera (0);
                 std::int32_t csamp = getCurrentEyeSamplesPerOmmatidium();
-                std::cout << "Current eye samples per ommatidium is " << csamp << std::endl;
+                std::cout << "Current eye samples per ommatidium for camera 0 is " << csamp << std::endl;
                 if (csamp < 32000) { changeCurrentEyeSamplesPerOmmatidiumBy (samples_per_omm_default - csamp); }
+                // Set samples for other compound eyes in the scene
+                nextCamera();
+                std::uint32_t _camidx = scene->getCameraIndex();
+                while (_camidx != 0) {
+                    csamp = getCurrentEyeSamplesPerOmmatidium();
+                    std::cout << "Current eye samples per ommatidium for camera " << _camidx << " is " << csamp << std::endl;
+                    if (csamp < 32000) { changeCurrentEyeSamplesPerOmmatidiumBy (samples_per_omm_default - csamp); }
+                    nextCamera();
+                    _camidx = scene->getCameraIndex();
+                }
             }
         }
 
         void setup_oces()
         {
-            // Use oces_reader to read in our eye data, esp. for the head
-            std::string oces_path = this->efpath;
-            mplot::tools::stripFileSuffix (oces_path);
-            oces_path += ".gltf";
-            // Now try to open oces_path
-            std::cout << "Attempt to load OCES file " << oces_path << "\n";
-            this->oces_reader.read (oces_path);
-            if (oces_reader.read_success == false) {
-                std::cout << "No associated OCES file for a head\n";
-            } else {
-                // Read the head and make a VisualModel
-                oces_reader.head_mesh.single_colour = {0.345f, 0.122f, 0.082f};
+            // Use oces_reader to read in our eye data, esp. for the head. One eye to be an OCES eye?
+            for (auto efp : this->efpaths) {
+                std::string oces_path = efp.second;
+                mplot::tools::stripFileSuffix (oces_path);
+                oces_path += ".gltf";
+                // Now try to open oces_path
+                std::cout << "Attempt to load OCES file " << oces_path << "\n";
+                this->oces_reader[efp.first].read (oces_path);
+                if (oces_reader[efp.first].read_success == false) {
+                    std::cout << "No associated OCES file for a head with this one.\n";
+                } else {
+                    std::cout << "Success loading OCES file " << oces_path << "\n";
+                    // Read the head and make a VisualModel
+                    constexpr float gam = 2.222222222222222f;
+                    oces_reader[efp.first].head_mesh.single_colour = {std::pow (0.345f, gam), std::pow (0.122f, gam), std::pow (0.082f, gam)};
+                    break;
+                }
             }
         }
 
@@ -312,15 +371,18 @@ export namespace craysim
             sm::mat<float, 4> ics = mplot::compoundray::getCameraSpace (scene);
             this->initial_camera_space.translate (ics.translation()); // Right handed
 
-            // Create an EyeVisual 'eye' in our scene
-            auto eyevm = std::make_unique<mplot::compoundray::EyeVisual<glver>> (sm::vec<>{}, &this->ommatidia_data, this->get_ommatidia_ptr(), this->get_head_mesh());
+            // Create an EyeVisual 'eye' in our scene just for camera 0
+            auto eyevm = std::make_unique<mplot::compoundray::EyeVisual<glver>> (sm::vec<>{},
+                                                                                 &this->ommatidia_datas[0],
+                                                                                 this->get_ommatidia_ptr(0),
+                                                                                 this->get_head_mesh(0));
             eyevm->set_parent (this->get_id());
             eyevm->setViewMatrix (this->initial_camera_space);
             eyevm->name = "EyeVisual";
             eyevm->finalize();
-            this->eye = this->addVisualModel (eyevm);
-            // This eye is the followed VM.
-            this->setFollowedVM (this->eye);
+            this->eyes[0] = this->addVisualModel (eyevm);
+            // This eye is the followed VM. If you teleport somewhere (such as with csv_playback) you have to call this again.
+            this->setFollowedVM (this->eyes[0]);
         }
 
         // Breadcrumb trail for max_bc breadcrumbs. Called at start of program, can be re-called
@@ -340,6 +402,8 @@ export namespace craysim
             isv->set_parent (this->get_id());
             isv->max_instances = max_bc;
             isv->radiusFixed = 0.004f;
+            isv->marker_offset = isv->radiusFixed;
+            isv->marker_offset_dirn = sm::vec<>::uy();
             isv->finalize();
             this->isvp = this->addVisualModel (isv);
         }
@@ -373,9 +437,70 @@ export namespace craysim
             this->compass_coords->setViewMatrix (this->get_compass_matrix());
         }
 
+        // Probably to go to mathplot
+        std::string film_director_path = {};
+        void setup_film_director (const std::string& path)
+        {
+            std::cout << __func__ << " called with path " << path << std::endl;
+            std::string _path = path;
+            try {
+                this->directions.clear();
+                if (path.empty() && !this->film_director_path.empty()) {
+                    _path = this->film_director_path;
+                }
+                this->film_director_path = _path;
+
+                this->film_director.init (_path);
+
+                if (this->film_director.ready) {
+                    // Get list of movement time points at which camera movements should be created
+                    nlohmann::json directions = this->film_director.get ("directions");
+                    // Iterate though directions
+                    for (auto dirn : directions) {
+                        sm::config c (dirn);
+
+                        std::uint32_t t = c.get<std::uint32_t>("event_time", 0);
+                        std::string et = c.get<std::string>("event_type", "unknown");
+
+                        this->directions[t] = mplot::direction_data();
+                        this->directions[t].id = t;
+                        this->directions[t].transform_time_frames = c.get<std::uint32_t> ("transform_time_frames", 0u);
+                        this->directions[t].min_jerk = c.get<bool> ("min_jerk", true);
+
+                        if (et == "sceneview") {
+                            this->directions[t].sceneview = c.get_vec<float, 16> ("sceneview");
+                            this->directions[t].event = mplot::direction_event::sceneview;
+                        } else if (et == "timed_translation") {
+                            this->directions[t].translation = c.get_vec<float, 3> ("translation");
+                            this->directions[t].event = mplot::direction_event::timed_translation;
+                        } else if (et == "timed_rotation") {
+                            this->directions[t].about_vert_angle = c.get<float> ("about_vert_angle_degrees", 0.0f) * sm::mathconst<float>::deg2rad;
+                            this->directions[t].tilt_angle = c.get<float> ("tilt_angle_degrees", 0.0f) * sm::mathconst<float>::deg2rad;
+                            this->directions[t].event = mplot::direction_event::timed_rotation;
+                        } else if (et == "timed_transform") {
+                            this->directions[t].sceneview = c.get_vec<float, 16> ("sceneview");
+                            this->directions[t].event = mplot::direction_event::timed_transform;
+                        } else if (et == "timed_orbit") {
+                            this->directions[t].orbit_axis = c.get_vec<float, 3> ("orbit_axis");
+                            this->directions[t].orbit_centre = c.get_vec<float, 3> ("orbit_centre");
+                            this->directions[t].orbit_angle = c.get<float> ("orbit_angle", 360.0f) * sm::mathconst<float>::deg2rad;
+                            this->directions[t].event = mplot::direction_event::timed_orbit;
+                        } else {
+                            std::cout << "Unknown event type\n";
+                        }
+                    }
+                } else {
+                    std::cout << "Failed to open JSON file '" << _path << "'\n";
+                }
+
+            } catch (const std::exception& e) {
+                std::cout << "Failed to open JSON file '" << _path << "' (exception: " << e.what() << ")\n";
+            }
+        }
+
         void setup_random_walk (const std::uint32_t _n_steps = 1500, const std::uint32_t _a_tau = 150, const float _kappa = 100, const float _a_max = 100)
         {
-            this->rrg = std::make_unique<craysim::random_walk<float>>(_n_steps, _a_tau, _kappa, _a_max);
+            this->rrg = std::make_unique<sm::random_walk<float>>(_n_steps, _a_tau, _kappa, _a_max);
         }
 
         void clear_breadcrumbs()
@@ -390,12 +515,11 @@ export namespace craysim
         {
             if (this->isvp == nullptr) { return; }
 
-            ++this->move_counter;
             if (this->breadcrumb_coords.size() < this->isvp->max_instances) {
                 this->breadcrumb_coords.push_back (bc_location);
                 this->breadcrumb_data.push_back (0.0f); // dummy for now
             } else {
-                this->breadcrumb_coords[move_counter % this->isvp->max_instances] = bc_location;
+                this->breadcrumb_coords[this->move_counter % this->isvp->max_instances] = bc_location;
                 // breadcrumb_data.push_back (0.0f); // dummy for now, to be flags.
             }
             if (this->bc_clr.empty() || this->bc_alpha.empty() || this->bc_scale.empty()) {
@@ -462,7 +586,7 @@ export namespace craysim
             cam_nextloc[2] += ltstr[2]; // update only x and z
             sm::mat<float, 4> cnl;
             cnl.translate (cam_nextloc);
-            setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cnl));
+            this->set_camera_pose (cnl);
             this->move_counter = 1;
         }
 
@@ -483,8 +607,8 @@ export namespace craysim
                 // Set up our camera using the data obtained from find_triangle_hit()
                 sm::mat<float, 4> cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight);
                 if (cam_to_scene != sm::mat<float, 4>::identity()) {
-                    std::cout << "Set camera pose matrix from\n" << cam_to_scene << std::endl;
-                    setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
+                    this->set_camera_pose (cam_to_scene);
+                    std::cout << "Camera/agent pose in scene coordinates: " << (cam_to_scene * sm::vec<>{}) << std::endl;
                 } else {
                     std::cout << "cam_to_scene is identity??\n";
                 }
@@ -507,7 +631,8 @@ export namespace craysim
             // reset to initial camera space if requested
             if (this->vstate.test (state::campose_reset_request) == true) {
                 this->stop(); // cancel any active movements
-                setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (this->initial_camera_space));
+                this->set_camera_pose (this->initial_camera_space);
+                this->setup_film_director (std::string(""));
 
                 this->clear_breadcrumbs();
                 if (this->sim_opts.test (craysim::options::path_from_csv) && !this->csv_positions.empty()) {
@@ -517,7 +642,7 @@ export namespace craysim
                 sm::mat<float, 4> camspace = mplot::compoundray::getCameraSpace (scene);
                 auto[hp_scene, _ti0] = this->land->navmesh->find_triangle_hit (camspace, this->land_to_scene);
                 cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight);
-                setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
+                this->set_camera_pose (cam_to_scene);
                 this->vstate.reset (state::campose_reset_request);
                 // t-1 values:
                 this->tm1_ti0 = _ti0;
@@ -527,32 +652,46 @@ export namespace craysim
         }
 
         // Detect changes in the compound-ray camera, and update all our EyeVisuals accordingly
-        void detect_camera_changes (std::vector<mplot::compoundray::EyeVisual<glver>*>& other_eyes)
+        void detect_camera_changes()
         {
-            if (this->eye == nullptr) { return; }
+            std::uint32_t camidx = scene->getCameraIndex();
+            std::uint32_t camidx_start = camidx;
+            do {
+                // Detect changes for compound ray camera camidx...
+                if (this->last_eye_size.contains (camidx) == false) { this->last_eye_size[camidx] = 0u; }
 
-            std::size_t curr_eye_size = this->last_eye_size;
-            if (isCompoundEyeActive()) { this->ommatidia = &scene->m_ommVecs[scene->getCameraIndex()]; }
-            // Detect changes in the camera and update eye model as necessary
-            if (this->ommatidia_data.size() == 0) {
-                if (isCompoundEyeActive()) { getCameraData (this->ommatidia_data); }
-            } // else no need to re-get data
-
-            // Update eyevm model (or just update colours)
-            this->eye->ommatidia = this->get_ommatidia_ptr();
-            for (auto oe : other_eyes) { oe->ommatidia = this->get_ommatidia_ptr(); }
-
-            if (this->ommatidia != nullptr) {
-                curr_eye_size = this->ommatidia->size();
-                if (curr_eye_size != this->last_eye_size) {
-                    this->eye->reinit();
-                    for (auto oe : other_eyes) { oe->reinit(); }
-                    this->last_eye_size = curr_eye_size;
-                } else {
-                    this->eye->reinitColours();
-                    for (auto oe : other_eyes) { oe->reinitColours(); } // 4x faster to just reinitColours
+                if (this->ommatidia_datas[camidx].size() == 0) {
+                    if (isCompoundEyeActive()) { getCameraData (this->ommatidia_datas[camidx]); }
                 }
-            }
+
+                if (this->eyes.contains (camidx) == true) {
+                    this->eyes[camidx]->ommatidia = this->get_ommatidia_ptr (camidx);
+
+                    for (auto& oe : this->other_eyes[camidx]) { oe->ommatidia = this->get_ommatidia_ptr (camidx); }
+
+                    // reinit or reinit colours
+                    if (this->ommatidias.contains (camidx) && this->ommatidias[camidx] != nullptr) {
+                        std::size_t curr_eye_size = this->ommatidias[camidx]->size();
+                        if (curr_eye_size == 0 || curr_eye_size != this->last_eye_size[camidx]) {
+
+                            this->eyes[camidx]->reinit();
+                            if (camidx < this->other_eyes.size()) {
+                                for (auto oe : this->other_eyes[camidx]) { oe->reinit(); }
+                            }
+                            this->last_eye_size[camidx] = curr_eye_size;
+
+                        } else {
+
+                            this->eyes[camidx]->reinitColours();
+                            if (camidx < this->other_eyes.size()) {
+                                for (auto oe : this->other_eyes[camidx]) { oe->reinitColours(); } // 4x faster to just reinitColours
+                            }
+                        }
+                    }
+                }
+                nextCamera();
+                camidx = scene->getCameraIndex();
+            } while (camidx != camidx_start);
         }
 
         // Has the camera rotated since the last ime step? Returns true if rotation in any plane is greater than the threshold.
@@ -743,19 +882,35 @@ export namespace craysim
                 }
             }
 
-            setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
+            this->set_camera_pose (cam_to_scene);
 
+            ++this->move_counter;
             this->add_breadcrumb (lastloc);
 
-            if (this->eye != nullptr) { this->eye->setViewMatrix (cam_to_scene); }
+            for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
             if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
             this->agent_coords->setViewMatrix (cam_to_scene);
+        }
+
+        // Set camera pose for all cameras
+        void set_camera_pose (const sm::mat<float, 4>& cam_to_scene)
+        {
+            std::uint32_t camidx = scene->getCameraIndex();
+            std::uint32_t camidx_start = camidx;
+            do {
+                setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
+                nextCamera();
+                camidx = scene->getCameraIndex();
+            } while (camidx != camidx_start);
         }
 
         // Make a keyboard based movement over the landscape
         void key_move_over_land (const float fps)
         {
-            if (isCompoundEyeActive()) { this->ommatidia = &scene->m_ommVecs[scene->getCameraIndex()]; }
+            if (isCompoundEyeActive()) {
+                auto _camidx = scene->getCameraIndex();
+                this->ommatidias[_camidx] = &scene->m_ommVecs[_camidx];
+            }
 
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
             if (this->is_actively_rotating()) {
@@ -816,19 +971,23 @@ export namespace craysim
                 }
 
                 // Move the camera to the new position
-                setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
+                this->set_camera_pose (cam_to_scene);
 
                 // Add a breadcrumb at the previous location
+                ++this->move_counter;
+
                 this->add_breadcrumb (lastloc);
             }
             this->check_reset_camspace (cam_to_scene); // if requested
+
             // Update the view matrix of eye and eye localspace axes
-            if (this->eye != nullptr) { this->eye->setViewMatrix (cam_to_scene); }
+            for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
             if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
             this->agent_coords->setViewMatrix (cam_to_scene);
+
         }
 
-        void walk_over_land (const float fps)
+        void walk_over_land()
         {
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
 
@@ -852,6 +1011,7 @@ export namespace craysim
                 this->tm1_ti0 = ti0_sv;
                 this->tm1_mv_camframe = mv_camframe;
                 this->tm1_cam_to_scene = cam_to_scene_sv;
+                ++this->move_counter;
                 this->add_breadcrumb (cam_to_scene_sv.translation());
 
             } catch (const std::exception& e) {
@@ -883,21 +1043,26 @@ export namespace craysim
                     throw e;
                 }
             }
-            setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
+            this->set_camera_pose (cam_to_scene);
             this->check_reset_camspace (cam_to_scene); // if requested
             // Update the view matrix of eye and eye localspace axes
-            if (this->eye != nullptr) { this->eye->setViewMatrix (cam_to_scene); }
+            for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
             if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
             this->agent_coords->setViewMatrix (cam_to_scene);
         }
 
-        bool csv_playback (const float fps)
+        bool csv_playback()
         {
             bool rtn = true;
 
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
 
             if (this->csv_positions.size() > this->move_counter) {
+
+                if (this->directions.contains (this->move_counter)) {
+                    this->setCurrentDirectionEvent (this->directions[this->move_counter]);
+                }
+
                 /*
                  * With a csv path, teleport between each location (and then estimate the heading of
                  * the ant, or use csv_dirns). CSV positions are relative to the landscape model.
@@ -925,7 +1090,7 @@ export namespace craysim
 
                     sm::mat<float, 4> cnl;
                     cnl.translate (cam_nextloc);
-                    setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cnl));
+                    this->set_camera_pose (cnl);
                     cam_to_scene = mplot::compoundray::getCameraSpace (scene);
                 }
 
@@ -946,8 +1111,8 @@ export namespace craysim
 
 
                     if (cam_to_scene != sm::mat<float, 4>::identity()) {
-                        setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
-                    } else { std::cout << "cam_to_scene is identity?!\n"; }
+                        this->set_camera_pose (cam_to_scene);
+                    } else { std::cout << "csv_playback: cam_to_scene is identity?!\n"; }
                     // else what to do if cam_to_scene is identity?
 
                     // Now we have moved, can compute instantaneous velocity
@@ -963,17 +1128,27 @@ export namespace craysim
                               << this->csv_positions[this->move_counter] << " (failed to find triangle hit)\n";
                 }
 
-                this->add_breadcrumb (lastcamloc); // increments move_counter
+                ++this->move_counter;
+                if (this->move_counter % breadcrumb_every == 0u) {
+                    this->add_breadcrumb (lastcamloc);
+                }
 
             } else { // no more movements
+                std::cout << "csv_playback: no more movements\n";
                 rtn = false;
             }
 
             this->check_reset_camspace (cam_to_scene); // if requested
-            // Update the view matrix of eye and eye localspace axes
-            if (this->eye != nullptr) { this->eye->setViewMatrix (cam_to_scene); }
+            // Update the view matrix of eye and eye loc->alspace axes
+            for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
             if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
             this->agent_coords->setViewMatrix (cam_to_scene);
+
+            // Update eyes[0]
+            if ((this->move_counter - 1) == 1) {
+                std::cout << "Update initial vm last locn\n";
+                this->setFollowedVM (this->eyes[0]);
+            }
 
             return rtn;
         };
@@ -998,8 +1173,8 @@ export namespace craysim
             dsv.read_contained_vals ("/tm1_cam_to_scene", this->tm1_cam_to_scene.arr);
             dsv.read_val ("/tm1_ti0", this->tm1_ti0);
 
-            setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (this->tm1_cam_to_scene));
-            if (this->eye != nullptr) { this->eye->setViewMatrix (this->tm1_cam_to_scene); }
+            this->set_camera_pose (this->tm1_cam_to_scene);
+            for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (this->tm1_cam_to_scene); } }
             if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (this->tm1_cam_to_scene); }
             this->agent_coords->setViewMatrix (this->tm1_cam_to_scene);
             std::cout << "First compute_mesh_movement from saved data:\n";
@@ -1012,8 +1187,8 @@ export namespace craysim
             _cam_to_scene = this->land->navmesh->compute_mesh_movement (_mv_camframe, _cam_to_scene, _land_to_scene, _hoverheight);
             std::cout << "compute_mesh_movement for time t returned!\n";
             // Set the new position for camera and ant models
-            setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (_cam_to_scene));
-            if (this->eye != nullptr) { this->eye->setViewMatrix (_cam_to_scene); }
+            this->set_camera_pose (_cam_to_scene);
+            for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (_cam_to_scene); } }
             if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (_cam_to_scene); }
             this->agent_coords->setViewMatrix (_cam_to_scene);
         }
@@ -1027,7 +1202,6 @@ export namespace craysim
 
         // Allows client code to set up other windows etc
         std::vector<mplot::Visual<glver>*> other_windows = {};
-        std::vector<mplot::compoundray::EyeVisual<glver>*> other_eyes = {};
         std::vector<mplot::Visual<glver>*> slow_windows = {};
         // How many fast renders to wait until we re-render the slow windows?
         std::uint64_t slow_every = 10u;
@@ -1038,15 +1212,13 @@ export namespace craysim
         // Call this from your main loop. Returns true if slow windows were processed
         bool render_and_poll ()
         {
-            ++this->render_counter;
-
             // The current camera may have changed, this subroutine deals with any changes in this->eye and other_eyes
-            this->detect_camera_changes (this->other_eyes); // reinits the eyes
+            this->detect_camera_changes(); // reinits the eyes
 
             // Now render the mathplot window
             this->render();
             // Change label after render (it needs v's context, not any of the other windows)
-            if (this->move_counter % 100 == 0) { this->fps_label_update(); }
+            if (this->move_counter % this->fps_label_update_period == 0) { this->fps_label_update(); }
 
             // Save some electricity while developing - limit to 60 FPS. For max speed use this->poll() (-x)
             if (this->sim_opts.test (craysim::options::max_fps)) { this->poll(); } else { this->wait (this->frame_tau); }
@@ -1074,10 +1246,19 @@ export namespace craysim
             if (this->vstate.test (craysim::visual<glver>::state::paused) == false) {
 
                 if (this->vstate.test (craysim::visual<glver>::state::walk)) {
-                    this->walk_over_land (this->fps_profiler.fps_mean);
+                    this->walk_over_land();
                 } else if (this->sim_opts.test (craysim::options::path_from_csv) && this->csv_positions.size() > this->move_counter) {
                     // Construct path from csv file of 2D agent locations
-                    this->csv_playback (this->fps_profiler.fps_mean);
+                    if (this->csv_playback() == false && this->sim_opts.test (craysim::options::making_movie)) {
+                        // In movie mode, finish as soon as the movie is made
+                        this->signal_to_quit();
+                    }
+                } else if (this->sim_opts.test (craysim::options::path_from_csv)
+                           && this->csv_positions.size() <= this->move_counter
+                           && this->sim_opts.test (craysim::options::making_movie)) {
+                    std::cout << "Ran out of moves making movies, signal to quit\n";
+                    this->signal_to_quit();
+
                 } else if (this->sim_opts.any_of ({craysim::options::api_movement, craysim::options::homing_mode})) {
                     // React to movements commanded by vec/quaternion or transformation matrix
                     // (i.e. by client code).
@@ -1087,25 +1268,42 @@ export namespace craysim
                 }
             }
 
+            std::uint32_t camidx = 0;
             // Call the compound-ray ray casting method to recompute the compound-eye view of the scene
             renderFrame();
             // Access data so that a brain model could be fed
             if (isCompoundEyeActive()) {
-                getCameraData (this->ommatidia_data);
-                this->ommatidia = &scene->m_ommVecs[scene->getCameraIndex()];
+                camidx = scene->getCameraIndex();
+                getCameraData (this->ommatidia_datas[camidx]);
+                this->ommatidias[camidx] = &scene->m_ommVecs[camidx];
 
-                // if csv mode, then save the data
-                if (this->sim_opts.all_of ({craysim::options::path_from_csv, craysim::options::save_hdf5})) {
+                // if csv mode, then save the data (camidx 0 only)
+                if (camidx == 0 && this->sim_opts.all_of ({craysim::options::path_from_csv, craysim::options::save_hdf5})) {
                     std::cout << "Saving frame...\n";
                     std::string ommframe = "/ommatidia_data/frame_" + std::to_string (this->move_counter);
                     try {
-                        record.add_contained_vals (ommframe.c_str(), this->ommatidia_data);
+                        record.add_contained_vals (ommframe.c_str(), this->ommatidia_datas[camidx]);
                     } catch (const std::exception& e) {} // Probably didn't move this time.
                 }
             }
 
+            // Render any other compound eyes in the scene
+            if (this->ommatidia_datas.size() > 1) {
+                nextCamera();
+                std::uint32_t _camidx = scene->getCameraIndex();
+                while (_camidx != camidx) {
+                    renderFrame();
+                    if (isCompoundEyeActive()) {
+                        getCameraData (this->ommatidia_datas[_camidx]);
+                        this->ommatidias[_camidx] = &scene->m_ommVecs[_camidx];
+                    }
+                    nextCamera();
+                    _camidx = scene->getCameraIndex();
+                }
+            }
+
             // Scale size of breadcrumbs based on distance
-            float iscl = 1.0f * std::log (1.0f + this->get_d_to_rotation_centre());
+            float iscl = this->bc_mult * std::log (1.0f + this->bc_mult * this->get_d_to_rotation_centre());
             this->isvp->set_instance_scale (iscl);
 
             if (this->compass_coords != nullptr) {
@@ -1118,9 +1316,9 @@ export namespace craysim
         // Save once-only data into the recording file (ommatidia data)
         void complete_recording()
         {
-            if (this->sim_opts.test (craysim::options::path_from_csv)) {
+            if (this->sim_opts.all_of ({craysim::options::path_from_csv, craysim::options::save_hdf5})) {
                 // convert std::vector<Ommatidium>* ommatidia into vvecs that can be h5 saved
-                auto ommat = this->get_ommatidia_ptr();
+                auto ommat = this->get_ommatidia_ptr(0);
                 sm::vvec<sm::vec<float, 3>> o_pos;
                 sm::vvec<sm::vec<float, 3>> o_dir;
                 sm::vvec<float> o_aa;
@@ -1139,6 +1337,7 @@ export namespace craysim
                 this->record.add_contained_vals ("/ommatidia/acceptanceAngleRadians", o_aa);
                 std::cout << "FO\n";
                 this->record.add_contained_vals ("/ommatidia/focalPointOffset", o_fo);
+                std::cout << "Completed recording" << std::endl;
             }
         }
 
@@ -1153,17 +1352,21 @@ export namespace craysim
 
         void fps_label_update()
         {
-            this->fps_label->setupText (this->fps_profiler.fps_txt + std::string(" "));
+            std::string lstr = {};
+            if (sim_opts.test (craysim::options::show_fps)) { lstr += this->fps_profiler.fps_txt; }
+            if (sim_opts.test (craysim::options::show_fps) && sim_opts.test (craysim::options::show_movenum)) { lstr += " "; }
+            if (sim_opts.test (craysim::options::show_movenum)) { lstr += std::to_string (this->move_counter); }
+            this->fps_label->setupText (lstr);
         }
 
-        std::vector<mplot::compoundray::Ommatidium>* get_ommatidia_ptr()
+        std::vector<mplot::compoundray::Ommatidium>* get_ommatidia_ptr (const std::uint32_t camidx)
         {
-            return reinterpret_cast<std::vector<mplot::compoundray::Ommatidium>*>(ommatidia);
+            return reinterpret_cast<std::vector<mplot::compoundray::Ommatidium>*>(ommatidias[camidx]);
         }
 
-        mplot::meshgroup* get_head_mesh()
+        mplot::meshgroup* get_head_mesh (const std::uint32_t camidx)
         {
-            return this->oces_reader.read_success ? reinterpret_cast<mplot::meshgroup*>(&this->oces_reader.head_mesh) : nullptr;
+            return this->oces_reader[camidx].read_success ? reinterpret_cast<mplot::meshgroup*>(&this->oces_reader[camidx].head_mesh) : nullptr;
         }
 
         // Get the transform matrix defining the pose of the camera/agent. That's stored in agent_coords
@@ -1233,37 +1436,43 @@ export namespace craysim
         sm::flags<craysim::options> sim_opts;
         // A member fps_profiler
         mplot::fps::profiler fps_profiler;
-        // The FPS label, accessible to client code
-        mplot::VisualTextModel<glver>* fps_label;
-        // Base path for glTF file
+        // The FPS label, accessible to client code. Can be used for FPS, frame number or a combination. Set options.
+        mplot::VisualTextModel<glver>* fps_label = nullptr;
+        // How often to update the label?
+        std::uint64_t fps_label_update_period = 33u;
+        // Base path for glTF file of the scene
         std::string basepath = {};
-        // Full path for glTF file
+        // Full path for glTF file of the scene
         std::string path = {};
-        // The eye file path, obtained from OCES file
-        std::string efpath = {};
-        // Open Compound Eye Standard reader used to access an agent head mesh (compound-ray reads the ommatidia info)
-        oces::reader oces_reader;
-        // Required in every craysim, I think. craysim::state? member of craysim::visual?
-        std::vector<std::array<float, 3>> ommatidia_data;
-        std::vector<Ommatidium>* ommatidia = nullptr;
+
         // This is the start position of the camera as loaded from the gltf or as first located 'on the landscape'
         sm::mat<float, 4> initial_camera_space;
 
-        // An mplot::VisualModel of the compound-ray eye
-        mplot::compoundray::EyeVisual<glver>* eye = nullptr;
-        // You may have a VisualModel of an 'agent body' to go another with your eye's EyeVisual
+        // The following containers are 'one for each compoundray camera' and are mapped with the camera ID.
+        // The eye file path(s)
+        std::map<std::uint32_t, std::string> efpaths;
+        // Open Compound Eye Standard reader used to access an agent head mesh (compound-ray reads the ommatidia info)
+        std::map<std::uint32_t, oces::reader> oces_reader;
+        // Required in every craysim, I think. craysim::state? member of craysim::visual?
+        std::map<std::uint32_t, std::vector<std::array<float, 3>>> ommatidia_datas;
+        std::map<std::uint32_t, std::vector<Ommatidium>*> ommatidias;
+        // We keep a track of the eye size for each compound ray camera. Used in detect_camera_changes
+        std::map<std::uint32_t, std::size_t> last_eye_size;
+        // An mplot::VisualModel of the compound-ray eye. This is the eye in the scene. Store one
+        // pointer-to-a-visualization for each compoundray camera.
+        std::map<std::uint32_t, mplot::compoundray::EyeVisual<glver>*> eyes;
+        // Allows for multiple EyeVisuals for each compoundray camera
+        std::map<std::uint32_t, std::vector<mplot::compoundray::EyeVisual<glver>*>> other_eyes;
+
+        // You may have a VisualModel of an 'agent body' to go along with your EyeVisual
         mplot::VisualModel<glver>* agent_body = nullptr;
-        // A coordinate arrow frame to show location of compound-ray eye/agent_body (in case they are tiny)
+        // A coordinate arrow frame to show location of compound-ray eye(s)/agent_body (in case they are tiny)
         mplot::CoordArrows<glver>* agent_coords = nullptr;
         // A coordinate arrow frame showing the agent's compass heading (i.e. the forward direction of the agent).
         mplot::CoordArrows<glver>* compass_coords = nullptr;
 
         // Visualization of a breadcrumb trail
         mplot::InstancedScatterVisual<glver>* isvp = nullptr;
-        // Track how many calls to render have been made. At 1000 FPS this overflows at 10^17 seconds which is about 10^9 years.
-        std::uint64_t render_counter = 0u;
-        // State for breadcrumb trail. A move counter
-        std::uint64_t move_counter = 0u;
         // Container for breadcrumb locations
         sm::vvec<sm::vec<float, 3>> breadcrumb_coords = {};
         // Container for breadcrumb data (size, colour, alpha, etc)
@@ -1274,6 +1483,10 @@ export namespace craysim
         sm::vvec<float> bc_alpha;
         // Breadcrumb scale values. May be empty. Set up in your client code
         sm::vvec<float> bc_scale;
+        // Skip some add_breadcrumb calls with this
+        std::uint32_t breadcrumb_every = 1u;
+        // Overall size multiplier for breadcrumbs
+        float bc_mult = 1.0f;
 
         // Client code gives us names of the navigation landscape. If we find the landscape, store a pointer to it with this
         mplot::VisualModel<glver>* land = nullptr;
@@ -1292,11 +1505,9 @@ export namespace craysim
         std::uint32_t last_ti = std::numeric_limits<std::uint32_t>::max();
         // This is the height above the landscape to place the camera/agent. Set it suitably in your application.
         float hoverheight = 0.01f;
-        // We keep a track of the eye size. Used in detect_camera_changes
-        std::size_t last_eye_size = 0u;
 
         // Random route generation object
-        std::unique_ptr<craysim::random_walk<float>> rrg;
+        std::unique_ptr<sm::random_walk<float>> rrg;
 
         // For debug saving and computation of instantaneous velocity
         sm::mat<float, 4> tm1_cam_to_scene = { std::numeric_limits<float>::max() };
@@ -1306,6 +1517,11 @@ export namespace craysim
         // Recording object
         sm::hdfdata record;// (h5_path, std::ios::out | std::ios::trunc);
 
+        // Defining scripted camera movements. Use a sm::config object to load a json file with a definition
+        sm::config film_director;
+
+        // This is populated from film_director.
+        std::map<std::uint32_t, mplot::direction_data> directions;
 
         // Movement state (class and bitset) (flags?)
         enum class move_sense : uint16_t {
@@ -1474,6 +1690,11 @@ export namespace craysim
                 } else if (key == mplot::key::r) {
                     this->stop();
                     this->vstate.set (state::campose_reset_request);
+                } else if (key == mplot::key::insert) {
+                    this->bc_mult += 0.2f;
+                } else if (key == mplot::key::delete_key) {
+                    this->bc_mult -= 0.2f;
+                    if (this->bc_mult < 0.0f) { this->bc_mult = 0.0f; }
                 }
 
             } else if (action == mplot::keyaction::release && !(mods & mplot::keymod::shift)) {
@@ -1555,17 +1776,17 @@ export namespace craysim
 
     // Add a suitable 2D projection to show our ant eye (distributed with OCES) in a flat fiew
     template <int glver>
-    void add_ant_eye_spherical_projection (craysim::visual<glver>& v, mplot::compoundray::EyeVisual<glver>* eyevm2)
+    void add_ant_eye_spherical_projection (craysim::visual<glver>& v, mplot::compoundray::EyeVisual<glver>* eyevm2, const std::uint32_t camidx)
     {
         // First eye of eye pair (one spherical projection)
         std::uint32_t sz = 1024;
         float ps_rad = 0.0001f;                  // projection sphere radius
         sm::vec<> centre = { -0.00002f, 0, 0 };  // projection sphere centre
 
-        if (v.oces_reader.read_success == true) {
-            sz = v.oces_reader.position.size();
+        if (v.oces_reader.contains (camidx) && v.oces_reader[camidx].read_success == true) {
+            sz = v.oces_reader[camidx].position.size();
             ps_rad = 0.0002f;
-            centre = { -0.00056, 0.00005, -0.00005 };
+            centre = { -0.00054, -0.00009, -0.00002 };
         }
 
         sm::mat<float, 4> twod_tr;                            // twod projection transformation
@@ -1575,7 +1796,7 @@ export namespace craysim
         sm::vec<> twod_shift = {0,0.0006,0};
         float rotn = -sm::mathconst<float>::pi_over_8;
         auto ptype = mplot::compoundray::EyeVisual<glver>::projection_type::mercator;
-        if (v.oces_reader.read_success == true) {
+        if (v.oces_reader.contains (camidx) && v.oces_reader[camidx].read_success == true) {
             std::cout << "Read from oces file!!\n";
             ptype = mplot::compoundray::EyeVisual<glver>::projection_type::equirectangular;
             twod_tr.translate (twod_shift);
@@ -1592,9 +1813,9 @@ export namespace craysim
         eyevm2->add_spherical_projection (ptype, twod_tr, centre, ps_rad, psrotn, 0, sz/2);
 
         // Second eye of the eye pair (another spherical projection)
-        if (v.oces_reader.read_success == true) {
-            if (v.oces_reader.mirrors.empty() == false) {
-                centre = (v.oces_reader.mirrors[0] * centre).less_one_dim();
+        if (v.oces_reader.contains (camidx) && v.oces_reader[camidx].read_success == true) {
+            if (v.oces_reader[camidx].mirrors.empty() == false) {
+                centre = (v.oces_reader[camidx].mirrors[0] * centre).less_one_dim();
                 sm::vec<> twod_shift_left = twod_shift;
                 twod_shift_left[0] *= -1.0f;
                 twod_tr.set_identity();
