@@ -27,6 +27,7 @@ macro(setup_module_variables_for_craysim_mathplot base_directory)
     ${base_directory}/mplot/fps/profiler.cppm
     ${base_directory}/mplot/compoundray/interop.cppm
     ${base_directory}/mplot/compoundray/Ommatidium.cppm
+    ${base_directory}/mplot/jcvoronoi/jc_voronoi.cppm
     ${base_directory}/mplot/compoundray/EyeVisual.cppm
     ${base_directory}/mplot/VerticesVisual.cppm
     ${base_directory}/mplot/NormalsVisual.cppm
