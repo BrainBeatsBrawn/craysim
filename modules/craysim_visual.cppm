@@ -211,7 +211,7 @@ export namespace craysim
     }
 
     template <int glver>
-    struct visual final : public mplot::Visual<glver>
+    struct visual : public mplot::Visual<glver>
     {
         using mc = sm::mathconst<float>;
 
@@ -1639,7 +1639,7 @@ export namespace craysim
     protected:
 
         static constexpr bool debug_callback_extra = false;
-        void key_callback_extra (int key, int scancode, int action, int mods) override final
+        void key_callback_extra (int key, int scancode, int action, int mods) override
         {
             if (this->vstate.test (state::freeze)) { return; } // Don't respond to movement keys
 
