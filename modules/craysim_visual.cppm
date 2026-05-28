@@ -1771,6 +1771,30 @@ export namespace craysim
                     }
                 }
             }
+
+            if (key == mplot::key::h && (mods & mplot::keymod::control) && action == mplot::keyaction::press) {
+                // craysim help
+                std::cout << "\ncraysim specific help:\n"
+                          << "wasd: Fwd/Left/Back/Right\n"
+                          << "p: Up\n"
+                          << "l: Down\n"
+                          << "Arrow keys: Pitch and Yaw\n"
+                          << "<>: Roll\n"
+                          << "Home/End: Change key commanded linear speed\n"
+                          << "Ins/Del: Adjust breadcrumb size\n"
+                          << "r: Reset camera to start of csv-directed movements\n"
+                          << "Ctrl-w: Flip random walk\n"
+                          << "t: Flips state 'show_cones' (deprecated)\n"
+                          << "c: Show agent's camera coordinate frame\n"
+                          << "e: Show agent's compass frame\n"
+                          << "o: Flip homing mode\n"
+                          << "Esc: Call stop()\n"
+                          << "f: Step when paused\n"
+                          << "space: pause\n"
+                          << "page up/down: Change samples per Ommatidium\n"
+                          << "v: Switch the view-follows mode\n"
+                          << std::flush;
+            }
         }
     };
 
