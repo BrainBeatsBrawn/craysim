@@ -218,7 +218,7 @@ export namespace craysim
         // When the program starts, how many samples per ommatidium/element do you want?
         static constexpr std::int32_t samples_per_omm_default = 64;
 
-        visual (std::int32_t width, std::int32_t height, const std::string& title, craysim::parsed_inputs& prog_opts)
+        visual (std::int32_t width, std::int32_t height, const std::string& title, craysim::parsed_inputs& prog_opts, const float _agent_gamma = 1.0f)
             : mplot::Visual<glver> (width, height, title)
         {
             this->sim_opts = prog_opts.opts;
@@ -261,6 +261,7 @@ export namespace craysim
             this->addLabel ("", {0.36f, 0.0f, -0.1f}, this->fps_label);
             this->setup_camera();
             this->setup_oces();
+            this->agent_eyevisual_gamma = _agent_gamma;
             this->setup_eyevisual();
             this->setup_breadcrumbs (1000u); // default 1000 breadcrumbs
             this->setup_agent_coords();
@@ -379,6 +380,7 @@ export namespace craysim
             eyevm->set_parent (this->get_id());
             eyevm->setViewMatrix (this->initial_camera_space);
             eyevm->name = "EyeVisual";
+            eyevm->setGamma (this->agent_eyevisual_gamma);
             eyevm->finalize();
             this->eyes[0] = this->addVisualModel (eyevm);
             // This eye is the followed VM. If you teleport somewhere (such as with csv_playback) you have to call this again.
@@ -1470,6 +1472,9 @@ export namespace craysim
         mplot::CoordArrows<glver>* agent_coords = nullptr;
         // A coordinate arrow frame showing the agent's compass heading (i.e. the forward direction of the agent).
         mplot::CoordArrows<glver>* compass_coords = nullptr;
+        // If you need to apply gamma correction to the Agent's EyeVisual, you can specify it with
+        // this parameter (set it in the constructor)
+        float agent_eyevisual_gamma = 1.0f;
 
         // Visualization of a breadcrumb trail
         mplot::InstancedScatterVisual<glver>* isvp = nullptr;
