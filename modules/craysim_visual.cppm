@@ -69,6 +69,7 @@ export namespace craysim
         debug_mv,         // Open a debug h5 file (craysim.h5) and run compute_mesh_movement once for debug of NavMesh
         show_fps,         // If true, show the FPS in the fps_label
         show_movenum,     // If true, show the current movement counter in the fps_label
+        move_by_flying,   // If false, then hug the landscape (whether movement is by key, api or whatever); if true, fly
         can_exit          // If set, program can exit now
     };
 
@@ -906,10 +907,49 @@ export namespace craysim
             } while (camidx != camidx_start);
         }
 
+        void key_move (const float fps)
+        {
+            if (this->sim_opts.test (craysim::options::move_by_flying)) {
+                this->key_move_flying (fps);
+            } else {
+                this->key_move_over_land (fps);
+            }
+        }
+
+        void key_move_flying (const float fps)
+        {
+            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            if (this->is_actively_rotating()) {
+                // Up-down (pitch) is rotation about local camera frame axis x
+                rotateCamerasLocallyAround (this->get_vertical_rotation_angle(), 1.0f, 0.0f, 0.0f);
+                // Left-and-right (yaw) is rotation about local camera frame axis y
+                rotateCamerasLocallyAround (this->get_horizontal_rotation_angle(), 0.0f, 1.0f, 0.0f);
+                // Roll
+                rotateCamerasLocallyAround (this->get_roll_rotation_angle(), 0.0f, 0.0f, 1.0f);
+                cam_to_scene = mplot::compoundray::getCameraSpace (scene); // update
+            }
+            if (this->is_actively_translating()) {
+                // Simpler than key_move_over_landscape
+                sm::vec<float> lastloc = cam_to_scene.translation();
+                sm::vec<float> mv_camframe = this->get_movement_vector (fps);
+                cam_to_scene.translate (mv_camframe);
+                this->set_camera_pose (cam_to_scene);
+                // Add a breadcrumb at the previous location
+                ++this->move_counter;
+                this->add_breadcrumb (lastloc);
+            }
+            this->check_reset_camspace (cam_to_scene); // if requested
+
+            // Update the view matrix of eye and eye localspace axes
+            for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
+            if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
+            this->agent_coords->setViewMatrix (cam_to_scene);
+        }
+
         // Make a keyboard based movement over the landscape
         void key_move_over_land (const float fps)
         {
-            if (isCompoundEyeActive()) {
+            if (isCompoundEyeActive()) { // FIXME: I don't think this stanza is necessary here.
                 auto _camidx = scene->getCameraIndex();
                 this->ommatidias[_camidx] = &scene->m_ommVecs[_camidx];
             }
@@ -986,7 +1026,43 @@ export namespace craysim
             for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
             if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
             this->agent_coords->setViewMatrix (cam_to_scene);
+        }
 
+        void walk()
+        {
+            if (this->sim_opts.test (craysim::options::move_by_flying)) {
+                this->walk_flying();
+            } else {
+                this->walk_over_land();
+            }
+        }
+
+        // Really: perform a 2D random walk in a plane
+        void walk_flying()
+        {
+            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+
+            // A random walk mode
+            if (!this->rrg || this->vstate.test (craysim::visual<glver>::state::walk) == false) { return; }
+
+            // set rotation and step length according to the Stone paper
+            this->rrg->step();
+            // rrg.omega is the angular speed rrg.speed is the linear speed
+            rotateCamerasLocallyAround (this->rrg->omega, 0.0f, 1.0f, 0.0f);
+            cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            // ti0, mv_camframe, cam_to_scene to save.
+            sm::vec<float> mv_camframe = { 0, 0, this->rrg->speed };
+            sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
+            cam_to_scene.translate (mv_camframe);
+            this->instantaneous_velocity = cam_to_scene.translation() - cam_to_scene_sv.translation();
+            ++this->move_counter;
+            this->add_breadcrumb (cam_to_scene_sv.translation());
+            this->set_camera_pose (cam_to_scene);
+            this->check_reset_camspace (cam_to_scene); // if requested
+            // Update the view matrix of eye and eye localspace axes
+            for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
+            if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
+            this->agent_coords->setViewMatrix (cam_to_scene);
         }
 
         void walk_over_land()
@@ -1248,7 +1324,7 @@ export namespace craysim
             if (this->vstate.test (craysim::visual<glver>::state::paused) == false) {
 
                 if (this->vstate.test (craysim::visual<glver>::state::walk)) {
-                    this->walk_over_land();
+                    this->walk();
                 } else if (this->sim_opts.test (craysim::options::path_from_csv) && this->csv_positions.size() > this->move_counter) {
                     // Construct path from csv file of 2D agent locations
                     if (this->csv_playback() == false && this->sim_opts.test (craysim::options::making_movie)) {
@@ -1266,7 +1342,7 @@ export namespace craysim
                     // (i.e. by client code).
                     this->api_move_over_land();
                 } else {
-                    this->key_move_over_land (this->fps_profiler.fps_mean);
+                    this->key_move (this->fps_profiler.fps_mean);
                 }
             }
 
