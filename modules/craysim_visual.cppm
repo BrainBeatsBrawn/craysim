@@ -595,7 +595,7 @@ export namespace craysim
 
         void setup_landscape()
         {
-            if (this->land == nullptr) { return; } // should called find_landscape() first
+            if (this->land == nullptr) { return; } // should have called find_landscape() first
 
             std::cout << "Landscape name: " << this->land->name << " was found [" << (land->vpos_size() / 3) << " vertices]\n";
             this->land_to_scene = land->getViewMatrix();
@@ -605,7 +605,19 @@ export namespace craysim
                 this->init_path_from_csv();
             }
 
-            auto[hp_scene, _ti0] = this->land->navmesh->find_triangle_hit (camspace, this->land_to_scene, 100.0f);
+            // One way to find_triangle_hit is to use the bounding box centre of this->land, and
+            // draw a vector from the camera position towards that centre. However, this can lead to
+            // the hit point being confusingly far away from the place the camera was set in the
+            // glTF.
+            //
+            // This would be the function call:
+            // auto[hp_scene, _ti0] = this->land->navmesh->find_triangle_hit (camspace, this->land_to_scene, 100.0f);
+            //
+            // A more useful approach is to simply find the hit in the -scene_up direction:
+            sm::vec<float> camloc_mf = (this->land_to_scene.inverse() * camspace * sm::vec<float>{}).less_one_dim();
+
+            auto[hp_scene, _ti0] = this->land->navmesh->find_triangle_hit (this->land_to_scene, camloc_mf, this->scene_up * -100.0f);
+
             if (_ti0 != std::numeric_limits<std::uint32_t>::max()) {
                 // Set up our camera using the data obtained from find_triangle_hit()
                 sm::mat<float, 4> cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight);
