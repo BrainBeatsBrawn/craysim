@@ -186,7 +186,8 @@ export namespace craysim
         return true;
     }
 
-    // Runtime-configurable sinusoidal lateral camera motion for super-resolution experiments.
+    // Runtime-configurable sinusoidal camera motion for super-resolution experiments.
+    // Supports lateral x translation and yaw oscillation with a shared phase/frequency.
     class sinusoidal_camera_motion
     {
     public:
@@ -194,10 +195,12 @@ export namespace craysim
 
         explicit sinusoidal_camera_motion (float amplitude_m,
                                            float frequency_hz = 1.0f,
-                                           float phase_rad = 0.0f)
+                                           float phase_rad = 0.0f,
+                                           float yaw_amplitude_deg = 1.0f)
             : amplitude_m_ (std::max (0.0f, amplitude_m))
             , frequency_hz_ (std::max (0.0f, frequency_hz))
             , phase_rad_ (phase_rad)
+            , yaw_amplitude_rad_ (std::max (0.0f, yaw_amplitude_deg) * sm::mathconst<float>::deg2rad)
         {}
 
         void set_amplitude_m (float amplitude_m)
@@ -222,8 +225,34 @@ export namespace craysim
             this->frequency_hz_ = std::max (0.0f, frequency_hz);
         }
 
+        void set_yaw_amplitude_deg (float yaw_amplitude_deg)
+        {
+            this->yaw_amplitude_rad_ = std::max (0.0f, yaw_amplitude_deg) * sm::mathconst<float>::deg2rad;
+        }
+
+        float get_yaw_amplitude_deg () const
+        {
+            return this->yaw_amplitude_rad_ * sm::mathconst<float>::rad2deg;
+        }
+
+        void increase_yaw_amplitude_deg (float delta_deg = 0.2f)
+        {
+            this->set_yaw_amplitude_deg (this->get_yaw_amplitude_deg() + std::max (0.0f, delta_deg));
+        }
+
+        void decrease_yaw_amplitude_deg (float delta_deg = 0.2f)
+        {
+            this->set_yaw_amplitude_deg (this->get_yaw_amplitude_deg() - std::max (0.0f, delta_deg));
+        }
+
         float displacement_delta (double time_s)
         {
+            if (this->amplitude_m_ <= 0.0f) {
+                this->initialized_ = false;
+                this->last_offset_m_ = 0.0f;
+                return 0.0f;
+            }
+
             const float offset = this->offset_at_time (time_s);
             if (!this->initialized_) {
                 this->last_offset_m_ = offset;
@@ -236,10 +265,40 @@ export namespace craysim
             return delta;
         }
 
+        float yaw_delta_rad (double time_s)
+        {
+            if (this->yaw_amplitude_rad_ <= 0.0f) {
+                this->yaw_initialized_ = false;
+                this->last_yaw_offset_rad_ = 0.0f;
+                return 0.0f;
+            }
+
+            const float yaw_offset = this->yaw_offset_at_time (time_s);
+            if (!this->yaw_initialized_) {
+                this->last_yaw_offset_rad_ = yaw_offset;
+                this->yaw_initialized_ = true;
+                return 0.0f;
+            }
+
+            const float delta = yaw_offset - this->last_yaw_offset_rad_;
+            this->last_yaw_offset_rad_ = yaw_offset;
+            return delta;
+        }
+
         void reset_tracking ()
         {
             this->initialized_ = false;
             this->last_offset_m_ = 0.0f;
+            this->yaw_initialized_ = false;
+            this->last_yaw_offset_rad_ = 0.0f;
+        }
+
+        // Return the absolute x displacement from the oscillation centre at a given time.
+        // Positive values mean the camera is shifted in the +x direction.
+        float current_offset_m (double time_s) const
+        {
+            if (this->amplitude_m_ <= 0.0f) { return 0.0f; }
+            return this->offset_at_time (time_s);
         }
 
     private:
@@ -251,11 +310,22 @@ export namespace craysim
             return this->amplitude_m_ * static_cast<float>(std::sin (angle));
         }
 
+        float yaw_offset_at_time (double time_s) const
+        {
+            const double angle =
+                (2.0 * static_cast<double>(sm::mathconst<float>::pi) * static_cast<double>(this->frequency_hz_) * time_s)
+                + static_cast<double>(this->phase_rad_);
+            return this->yaw_amplitude_rad_ * static_cast<float>(std::sin (angle));
+        }
+
         float amplitude_m_ = 0.0f;
         float frequency_hz_ = 1.0f;
         float phase_rad_ = 0.0f;
         bool initialized_ = false;
         float last_offset_m_ = 0.0f;
+        float yaw_amplitude_rad_ = 1.0f * sm::mathconst<float>::deg2rad;
+        bool yaw_initialized_ = false;
+        float last_yaw_offset_rad_ = 0.0f;
     };
 
     template <int glver>
@@ -1406,14 +1476,32 @@ export namespace craysim
             return this->camera_motion.get_amplitude_m();
         }
 
+        void set_camera_motion_yaw_amplitude_deg (float yaw_amplitude_deg)
+        {
+            this->camera_motion.set_yaw_amplitude_deg (yaw_amplitude_deg);
+            this->camera_motion.reset_tracking();
+        }
+
+        float get_camera_motion_yaw_amplitude_deg () const
+        {
+            return this->camera_motion.get_yaw_amplitude_deg();
+        }
+
         void apply_overlay_camera_motion (double time_s)
         {
             const float lateral_delta = this->camera_motion.displacement_delta (time_s);
-            if (std::fabs (lateral_delta) <= std::numeric_limits<float>::epsilon()) {
+            const float yaw_delta = this->camera_motion.yaw_delta_rad (time_s);
+            if (std::fabs (lateral_delta) <= std::numeric_limits<float>::epsilon()
+                && std::fabs (yaw_delta) <= std::numeric_limits<float>::epsilon()) {
                 return;
             }
 
             this->setContext();
+
+            // Yaw around camera-local +y axis.
+            sm::vec<float> yaw_axis = sm::vec<float>::uy();
+            this->rotate_camera (yaw_axis, yaw_delta);
+
             sm::vec<float> oscillatory_mv = { lateral_delta, 0.0f, 0.0f };
             this->move_camera (oscillatory_mv);
             this->api_move_over_land();
@@ -1555,6 +1643,16 @@ export namespace craysim
                     this->camera_motion.reset_tracking();
                     std::cout << "Sinusoidal camera amplitude reduced to "
                               << this->camera_motion.get_amplitude_m() << "m" << std::endl;
+                } else if (key == mplot::key::i && !mods) {
+                    this->camera_motion.increase_yaw_amplitude_deg (0.2f);
+                    this->camera_motion.reset_tracking();
+                    std::cout << "Sinusoidal yaw amplitude increased to "
+                              << this->camera_motion.get_yaw_amplitude_deg() << "deg" << std::endl;
+                } else if (key == mplot::key::j && !mods) {
+                    this->camera_motion.decrease_yaw_amplitude_deg (0.2f);
+                    this->camera_motion.reset_tracking();
+                    std::cout << "Sinusoidal yaw amplitude reduced to "
+                              << this->camera_motion.get_yaw_amplitude_deg() << "deg" << std::endl;
                 } else if (key == mplot::key::r) {
                     this->stop();
                     this->vstate.set (state::campose_reset_request);
