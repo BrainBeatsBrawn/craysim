@@ -186,6 +186,78 @@ export namespace craysim
         return true;
     }
 
+    // Runtime-configurable sinusoidal lateral camera motion for super-resolution experiments.
+    class sinusoidal_camera_motion
+    {
+    public:
+        sinusoidal_camera_motion() = default;
+
+        explicit sinusoidal_camera_motion (float amplitude_m,
+                                           float frequency_hz = 1.0f,
+                                           float phase_rad = 0.0f)
+            : amplitude_m_ (std::max (0.0f, amplitude_m))
+            , frequency_hz_ (std::max (0.0f, frequency_hz))
+            , phase_rad_ (phase_rad)
+        {}
+
+        void set_amplitude_m (float amplitude_m)
+        {
+            this->amplitude_m_ = std::max (0.0f, amplitude_m);
+        }
+
+        float get_amplitude_m () const { return this->amplitude_m_; }
+
+        void increase_amplitude (float delta_m = 0.01f)
+        {
+            this->set_amplitude_m (this->amplitude_m_ + std::max (0.0f, delta_m));
+        }
+
+        void decrease_amplitude (float delta_m = 0.01f)
+        {
+            this->set_amplitude_m (this->amplitude_m_ - std::max (0.0f, delta_m));
+        }
+
+        void set_frequency_hz (float frequency_hz)
+        {
+            this->frequency_hz_ = std::max (0.0f, frequency_hz);
+        }
+
+        float displacement_delta (double time_s)
+        {
+            const float offset = this->offset_at_time (time_s);
+            if (!this->initialized_) {
+                this->last_offset_m_ = offset;
+                this->initialized_ = true;
+                return 0.0f;
+            }
+
+            const float delta = offset - this->last_offset_m_;
+            this->last_offset_m_ = offset;
+            return delta;
+        }
+
+        void reset_tracking ()
+        {
+            this->initialized_ = false;
+            this->last_offset_m_ = 0.0f;
+        }
+
+    private:
+        float offset_at_time (double time_s) const
+        {
+            const double angle =
+                (2.0 * static_cast<double>(sm::mathconst<float>::pi) * static_cast<double>(this->frequency_hz_) * time_s)
+                + static_cast<double>(this->phase_rad_);
+            return this->amplitude_m_ * static_cast<float>(std::sin (angle));
+        }
+
+        float amplitude_m_ = 0.0f;
+        float frequency_hz_ = 1.0f;
+        float phase_rad_ = 0.0f;
+        bool initialized_ = false;
+        float last_offset_m_ = 0.0f;
+    };
+
     template <int glver>
     struct visual final : public mplot::Visual<glver>
     {
@@ -513,7 +585,9 @@ export namespace craysim
         // Detect changes in the compound-ray camera, and update all our EyeVisuals accordingly
         void detect_camera_changes (std::vector<mplot::compoundray::EyeVisual<glver>*>& other_eyes)
         {
-            if (this->eye == nullptr) { return; }
+            if (this->eye == nullptr) { 
+                std::cout << "No eye visual, so skipping camera change detection\n";
+                return; }
 
             std::size_t curr_eye_size = this->last_eye_size;
             if (isCompoundEyeActive()) { this->ommatidia = &scene->m_ommVecs[scene->getCameraIndex()]; }
@@ -756,9 +830,9 @@ export namespace craysim
 
             if (this->is_actively_translating()) {
                 if (this->move_state.test (craysim::visual<glver>::move_sense::up)) {
-                    this->hoverheight += 0.0001f;
+                    this->hoverheight += 0.01f;
                 } else if (this->move_state.test (craysim::visual<glver>::move_sense::down)) {
-                    this->hoverheight -= 0.0001f;
+                    this->hoverheight -= 0.01f;
                     if (this->hoverheight < 0.0f) { this->hoverheight = 0.0f; }
                 }
                 sm::vec<float> mv_camframe = this->get_movement_vector (fps);
@@ -1319,6 +1393,32 @@ export namespace craysim
         sm::vec<float> api_cam_rotn_axis = this->scene_up;
         float api_cam_rotn_angle = 0.0f;
         sm::vec<float> api_cam_mv = {}; // A movement in the camera's frame. z is forwards.
+        craysim::sinusoidal_camera_motion camera_motion = craysim::sinusoidal_camera_motion (0.0f);
+
+        void set_camera_motion_amplitude_m (float amplitude_m)
+        {
+            this->camera_motion.set_amplitude_m (amplitude_m);
+            this->camera_motion.reset_tracking();
+        }
+
+        float get_camera_motion_amplitude_m () const
+        {
+            return this->camera_motion.get_amplitude_m();
+        }
+
+        void apply_overlay_camera_motion (double time_s)
+        {
+            const float lateral_delta = this->camera_motion.displacement_delta (time_s);
+            if (std::fabs (lateral_delta) <= std::numeric_limits<float>::epsilon()) {
+                return;
+            }
+
+            this->setContext();
+            sm::vec<float> oscillatory_mv = { lateral_delta, 0.0f, 0.0f };
+            this->move_camera (oscillatory_mv);
+            this->api_move_over_land();
+        }
+
         void rotate_camera (const sm::vec<float>& _axis, const float _angle)
         {
             this->api_cam_rotn_axis = _axis;
@@ -1445,6 +1545,16 @@ export namespace craysim
                 } else if (key == mplot::key::home) {
                     this->kcmd_speed = this->kcmd_speed * 2.0f;
                     std::cout << "Speed increased to " << this->kcmd_speed  << "m/s" << std::endl;
+                } else if (key == mplot::key::o && !mods) {
+                    this->camera_motion.increase_amplitude (0.01f);
+                    this->camera_motion.reset_tracking();
+                    std::cout << "Sinusoidal camera amplitude increased to "
+                              << this->camera_motion.get_amplitude_m() << "m" << std::endl;
+                } else if (key == mplot::key::k && !mods) {
+                    this->camera_motion.decrease_amplitude (0.01f);
+                    this->camera_motion.reset_tracking();
+                    std::cout << "Sinusoidal camera amplitude reduced to "
+                              << this->camera_motion.get_amplitude_m() << "m" << std::endl;
                 } else if (key == mplot::key::r) {
                     this->stop();
                     this->vstate.set (state::campose_reset_request);
@@ -1491,7 +1601,7 @@ export namespace craysim
                     this->vstate.flip (state::show_camframe);
                 } else if (key == mplot::key::e) {
                     this->vstate.flip (state::show_compass);
-                } else if (key == mplot::key::o) {
+                } else if (key == mplot::key::o && (mods & mplot::keymod::control)) {
                     std::cout << "Flip homing\n";
                     this->sim_opts.flip (craysim::options::homing_mode);
                 } else if (key == mplot::key::escape) {
