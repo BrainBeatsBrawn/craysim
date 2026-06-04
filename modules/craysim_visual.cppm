@@ -225,6 +225,8 @@ export namespace craysim
             this->frequency_hz_ = std::max (0.0f, frequency_hz);
         }
 
+        float get_frequency_hz () const { return this->frequency_hz_; }
+
         void set_yaw_amplitude_deg (float yaw_amplitude_deg)
         {
             this->yaw_amplitude_rad_ = std::max (0.0f, yaw_amplitude_deg) * sm::mathconst<float>::deg2rad;
@@ -299,6 +301,12 @@ export namespace craysim
         {
             if (this->amplitude_m_ <= 0.0f) { return 0.0f; }
             return this->offset_at_time (time_s);
+        }
+
+        float current_yaw_offset_rad (double time_s) const
+        {
+            if (this->yaw_amplitude_rad_ <= 0.0f) { return 0.0f; }
+            return this->yaw_offset_at_time (time_s);
         }
 
     private:
@@ -1476,15 +1484,36 @@ export namespace craysim
             return this->camera_motion.get_amplitude_m();
         }
 
+        void set_camera_motion_frequency_hz (float frequency_hz)
+        {
+            this->camera_motion.set_frequency_hz (frequency_hz);
+            this->camera_motion.reset_tracking();
+        }
+
         void set_camera_motion_yaw_amplitude_deg (float yaw_amplitude_deg)
         {
             this->camera_motion.set_yaw_amplitude_deg (yaw_amplitude_deg);
             this->camera_motion.reset_tracking();
         }
 
+        float get_camera_motion_frequency_hz () const
+        {
+            return this->camera_motion.get_frequency_hz();
+        }
+
         float get_camera_motion_yaw_amplitude_deg () const
         {
             return this->camera_motion.get_yaw_amplitude_deg();
+        }
+float get_camera_motion_current_yaw_rad (double time_s) const
+        {
+            return this->camera_motion.current_yaw_offset_rad (time_s);
+        }
+
+        
+        float get_camera_motion_current_offset_m (double time_s) const
+        {
+            return this->camera_motion.current_offset_m (time_s);
         }
 
         void apply_overlay_camera_motion (double time_s)
