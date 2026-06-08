@@ -78,7 +78,7 @@ export namespace craysim
     {
         sm::flags<craysim::options> opts;
         std::string gltf_path = {};
-        std::string film_director_path = {};
+        std::string json_config_path = {};
         std::string csv_path = {};
         std::string h5_path = {};
         std::string hovh = {};
@@ -112,7 +112,7 @@ export namespace craysim
             } else if (arg == "-j") {
                 rtn.opts |= craysim::options::have_film_director;
                 i++;
-                rtn.film_director_path = std::string(argv[i]);
+                rtn.json_config_path = std::string(argv[i]);
             } else if (arg == "-5") {
                 rtn.opts |= craysim::options::save_hdf5;
             } else if (arg == "-d") {
@@ -269,7 +269,7 @@ export namespace craysim
             this->setup_compass_coords();
 
             // For json film direction, first try a path based on any csv path we have
-            if (prog_opts.film_director_path.empty() && !prog_opts.csv_path.empty()) {
+            if (prog_opts.json_config_path.empty() && !prog_opts.csv_path.empty()) {
                 // If csv_path had commas in it, then just use the first one.
                 std::vector<std::string> cpaths = mplot::tools::stringToVector (prog_opts.csv_path, ",");
                 // Construct json path from csv path and try that
@@ -281,8 +281,8 @@ export namespace craysim
                 this->setup_film_director (candidate_json);
 
             } else {
-                if (!prog_opts.film_director_path.empty()) {
-                    this->setup_film_director (prog_opts.film_director_path);
+                if (!prog_opts.json_config_path.empty()) {
+                    this->setup_film_director (prog_opts.json_config_path);
                 }
             }
 
@@ -441,17 +441,17 @@ export namespace craysim
         }
 
         // Probably to go to mathplot
-        std::string film_director_path = {};
+        std::string json_config_path = {};
         void setup_film_director (const std::string& path)
         {
             std::cout << __func__ << " called with path " << path << std::endl;
             std::string _path = path;
             try {
                 this->directions.clear();
-                if (path.empty() && !this->film_director_path.empty()) {
-                    _path = this->film_director_path;
+                if (path.empty() && !this->json_config_path.empty()) {
+                    _path = this->json_config_path;
                 }
-                this->film_director_path = _path;
+                this->json_config_path = _path;
 
                 this->film_director.init (_path);
 
