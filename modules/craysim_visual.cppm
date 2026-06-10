@@ -512,6 +512,11 @@ export namespace craysim
             this->breadcrumb_coords.clear();
             this->breadcrumb_data.clear();
             // Leave bc_clr/bc_alpha/bc_scale for now
+            if (this->bc_clr.empty() || this->bc_alpha.empty() || this->bc_scale.empty()) {
+                this->isvp->set_instance_data (this->breadcrumb_coords);
+            } else {
+                this->isvp->set_instance_data (this->breadcrumb_coords, this->bc_clr, this->bc_alpha, this->bc_scale);
+            }
         }
 
         void add_breadcrumb (const sm::vec<>& bc_location)
@@ -659,6 +664,7 @@ export namespace craysim
                 cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight);
                 this->set_camera_pose (cam_to_scene);
                 this->vstate.reset (state::campose_reset_request);
+                this->vstate.set (state::campose_was_reset); // client code can read (and reset) this flag
                 // t-1 values:
                 this->tm1_ti0 = _ti0;
                 this->tm1_mv_camframe = {};
@@ -1617,7 +1623,8 @@ export namespace craysim
         std::map<std::uint32_t, mplot::direction_data> directions;
 
         // Movement state (class and bitset) (flags?)
-        enum class move_sense : uint16_t {
+        enum class move_sense : std::uint16_t
+        {
             forward, backward, left, right, up, down,
             rot_up, rot_down, rot_left, rot_right, rot_roll_left, rot_roll_right
         };
@@ -1632,9 +1639,11 @@ export namespace craysim
         // The instantaneous velocity arising from the last movement
         sm::vec<float> instantaneous_velocity = {};
 
-        enum class state : uint8_t {
+        enum class state : std::uint16_t
+        {
             show_cones,            // Parameter for EyeVisual. Draw simple flared tubes in mathplot window
             campose_reset_request, // A request to reset the pose of the camera
+            campose_was_reset,     // Flags that the camera post WAS reset (for client code)
             show_camframe,         // Show camera axes?
             show_compass,          // Show compass axes?
             paused,                // Pause sim (i.e. pause time)?
