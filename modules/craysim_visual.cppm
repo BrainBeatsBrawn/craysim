@@ -660,7 +660,8 @@ export namespace craysim
                 }
 
                 sm::mat<float, 4> camspace = mplot::compoundray::getCameraSpace (scene);
-                auto[hp_scene, _ti0] = this->land->navmesh->find_triangle_hit (camspace, this->land_to_scene);
+                sm::vec<float> camloc_mf = (this->land_to_scene.inverse() * camspace * sm::vec<float>{}).less_one_dim();
+                auto[hp_scene, _ti0] = this->land->navmesh->find_triangle_hit (this->land_to_scene, camloc_mf, this->scene_up * -100.0f);
                 cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight);
                 this->set_camera_pose (cam_to_scene);
                 this->vstate.reset (state::campose_reset_request);
