@@ -217,9 +217,10 @@ export namespace craysim
         using mc = sm::mathconst<float>;
 
         // When the program starts, how many samples per ommatidium/element do you want?
-        static constexpr std::int32_t samples_per_omm_default = 64;
+        std::int32_t samples_per_omm_default = 64;
 
-        visual (std::int32_t width, std::int32_t height, const std::string& title, craysim::parsed_inputs& prog_opts, const float _agent_gamma = 1.0f)
+        visual (std::int32_t width, std::int32_t height, const std::string& title, craysim::parsed_inputs& prog_opts,
+                const std::int32_t samples_default = 64, const float _agent_gamma = 1.0f)
             : mplot::Visual<glver> (width, height, title)
         {
             this->sim_opts = prog_opts.opts;
@@ -249,6 +250,8 @@ export namespace craysim
                 sm::quaternion<float> def_q (sm::vec<float>::ux(), mc::pi_over_2); // non-blender only
                 this->setSceneRotation (def_q);
             }
+
+            this->samples_per_omm_default = samples_default;
 
             // We follow the agent as it moves by default, but craysim has a 'don't follow' option
             if (this->sim_opts.test (craysim::options::no_follow_agent)) {
@@ -339,6 +342,22 @@ export namespace craysim
                     nextCamera();
                     _camidx = scene->getCameraIndex();
                 }
+            }
+        }
+
+        void set_samples_per_ommatidium (const std::int32_t samples)
+        {
+            gotoCamera (0);
+            std::uint32_t _camidx = scene->getCameraIndex();
+            if (_camidx == 0) {
+                std::cout << "Can't set samples per ommatidium; no camera yet\n";
+            }
+            while (_camidx != 0) {
+                std::int32_t csamp = getCurrentEyeSamplesPerOmmatidium();
+                std::cout << "Current eye samples per ommatidium for camera " << _camidx << " is " << csamp << std::endl;
+                setCurrentEyeSamplesPerOmmatidium (samples);
+                nextCamera();
+                _camidx = scene->getCameraIndex();
             }
         }
 
@@ -906,7 +925,7 @@ export namespace craysim
 
             this->set_camera_pose (cam_to_scene);
 
-            ++this->move_counter;
+            //++this->move_counter;
             this->add_breadcrumb (lastloc);
 
             for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
@@ -1157,6 +1176,7 @@ export namespace craysim
             if (this->csv_positions.size() > this->move_counter) {
 
                 if (this->directions.contains (this->move_counter)) {
+                    std::cout << "Call setCurrentDirectionEvent (this->directions[" << this->move_counter << "])\n";
                     this->setCurrentDirectionEvent (this->directions[this->move_counter]);
                 }
 
@@ -1363,8 +1383,10 @@ export namespace craysim
                 } else {
                     this->key_move (this->fps_profiler.fps_mean);
                 }
+            } else if (this->vstate.test (craysim::visual<glver>::state::paused) == true
+                       && this->sim_opts.any_of ({craysim::options::api_movement, craysim::options::homing_mode})) {
+                this->api_move_over_land(); // BUT don't inc move counter!
             }
-
             std::uint32_t camidx = 0;
             // Call the compound-ray ray casting method to recompute the compound-eye view of the scene
             renderFrame();
