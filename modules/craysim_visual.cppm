@@ -65,6 +65,10 @@ export namespace craysim
         have_film_director, // user passed a json config file for film direction
         making_movie,     // If true, we're making a movie
         no_follow_agent,  // If true DON'T follow the agent (for some movies, this is useful)
+        breadcrumbs_csv,   // If true, show breadcrumbs for csv-specified movements
+        breadcrumbs_keymv, // If true, show breadcrumbs for key-commanded movements
+        breadcrumbs_api,   // If true, show breadcrumbs for API-commanded movements
+        breadcrumbs_walk,  // If true, show breadcrumbs for random-walk movements
         save_hdf5,        // If true, then save any output data in HDF5 (active in 'path_from_csv' mode)
         debug_mv,         // Open a debug h5 file (craysim.h5) and run compute_mesh_movement once for debug of NavMesh
         show_fps,         // If true, show the FPS in the fps_label
@@ -410,6 +414,12 @@ export namespace craysim
         // Breadcrumb trail for max_bc breadcrumbs. Called at start of program, can be re-called
         void setup_breadcrumbs (std::uint64_t max_bc)
         {
+            // Set default options
+            this->sim_opts.set (craysim::options::breadcrumbs_csv, true);
+            this->sim_opts.set (craysim::options::breadcrumbs_keymv, false);
+            this->sim_opts.set (craysim::options::breadcrumbs_api, false);
+            this->sim_opts.set (craysim::options::breadcrumbs_walk, true);
+
             if (this->isvp != nullptr) {
                 // check max_bc same as max_instances
                 if (max_bc == isvp->max_instances) {
@@ -925,8 +935,10 @@ export namespace craysim
 
             this->set_camera_pose (cam_to_scene);
 
-            //++this->move_counter;
-            this->add_breadcrumb (lastloc);
+            if (this->sim_opts.test (craysim::options::breadcrumbs_api)) {
+                ++this->move_counter;
+                this->add_breadcrumb (lastloc);
+            }
 
             for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
             if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
@@ -972,9 +984,11 @@ export namespace craysim
                 sm::vec<float> mv_camframe = this->get_movement_vector (fps);
                 cam_to_scene.translate (mv_camframe);
                 this->set_camera_pose (cam_to_scene);
-                // Add a breadcrumb at the previous location
-                ++this->move_counter;
-                this->add_breadcrumb (lastloc);
+                if (this->sim_opts.test (craysim::options::breadcrumbs_keymv)) {
+                    // Add a breadcrumb at the previous location
+                    ++this->move_counter;
+                    this->add_breadcrumb (lastloc);
+                }
             }
             this->check_reset_camspace (cam_to_scene); // if requested
 
@@ -1053,10 +1067,11 @@ export namespace craysim
                 // Move the camera to the new position
                 this->set_camera_pose (cam_to_scene);
 
-                // Add a breadcrumb at the previous location
-                ++this->move_counter;
-
-                this->add_breadcrumb (lastloc);
+                if (this->sim_opts.test (craysim::options::breadcrumbs_keymv)) {
+                    // Add a breadcrumb at the previous location
+                    ++this->move_counter;
+                    this->add_breadcrumb (lastloc);
+                }
             }
             this->check_reset_camspace (cam_to_scene); // if requested
 
@@ -1093,8 +1108,10 @@ export namespace craysim
             sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
             cam_to_scene.translate (mv_camframe);
             this->instantaneous_velocity = cam_to_scene.translation() - cam_to_scene_sv.translation();
-            ++this->move_counter;
-            this->add_breadcrumb (cam_to_scene_sv.translation());
+            if (this->sim_opts.test (craysim::options::breadcrumbs_walk)) {
+                ++this->move_counter;
+                this->add_breadcrumb (cam_to_scene_sv.translation());
+            }
             this->set_camera_pose (cam_to_scene);
             this->check_reset_camspace (cam_to_scene); // if requested
             // Update the view matrix of eye and eye localspace axes
@@ -1127,8 +1144,10 @@ export namespace craysim
                 this->tm1_ti0 = ti0_sv;
                 this->tm1_mv_camframe = mv_camframe;
                 this->tm1_cam_to_scene = cam_to_scene_sv;
-                ++this->move_counter;
-                this->add_breadcrumb (cam_to_scene_sv.translation());
+                if (this->sim_opts.test (craysim::options::breadcrumbs_walk)) {
+                    ++this->move_counter;
+                    this->add_breadcrumb (cam_to_scene_sv.translation());
+                }
 
             } catch (const std::exception& e) {
                 std::string msg (e.what());
@@ -1237,6 +1256,8 @@ export namespace craysim
                     //std::cout << "instant vel: " << this->instantaneous_velocity
                     //          << "   cam_to_scene fwds = "
                     //          << (cam_to_scene * sm::vec<>::uz()) << std::endl;
+                    this->distance_moved += this->instantaneous_velocity.length();
+                    //std::cout << "Distance moved is now " << this->distance_moved << std::endl;
 
                 } else {
                     // Rather than throwing, could just move on to next in csv?
@@ -1245,9 +1266,11 @@ export namespace craysim
                               << this->csv_positions[this->move_counter] << " (failed to find triangle hit)\n";
                 }
 
-                ++this->move_counter;
-                if (this->move_counter % breadcrumb_every == 0u) {
-                    this->add_breadcrumb (lastcamloc);
+                if (this->sim_opts.test (craysim::options::breadcrumbs_csv)) {
+                    ++this->move_counter;
+                    if (this->move_counter % breadcrumb_every == 0u) {
+                        this->add_breadcrumb (lastcamloc);
+                    }
                 }
 
             } else { // no more movements
@@ -1385,7 +1408,7 @@ export namespace craysim
                 }
             } else if (this->vstate.test (craysim::visual<glver>::state::paused) == true
                        && this->sim_opts.any_of ({craysim::options::api_movement, craysim::options::homing_mode})) {
-                this->api_move_over_land(); // BUT don't inc move counter!
+                this->api_move_over_land(); // BUT don't inc move counter! This enables rotating while paused
             }
             std::uint32_t camidx = 0;
             // Call the compound-ray ray casting method to recompute the compound-eye view of the scene
@@ -1658,6 +1681,9 @@ export namespace craysim
         float kcmd_speed = 0.5f;
         // Speed of rotations
         float kcmd_angular_speed = 2.0f * mc::two_pi / 360.0f;
+
+        // The distance (in scene units) that the agent/camera has moved.
+        float distance_moved = 0.0f;
 
         // The instantaneous velocity arising from the last movement
         sm::vec<float> instantaneous_velocity = {};
