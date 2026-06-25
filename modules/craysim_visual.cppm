@@ -934,8 +934,15 @@ export namespace craysim
                 sm::vec<float> mv_camframe = this->get_movement_vector (fps);
                 sm::vec<float> lastloc = cam_to_scene.translation();
                 sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
-                std::uint32_t ti0_sv = this->land->navmesh->ti0;
+                std::uint32_t ti0_sv = 0u;
                 try {
+                    if (this->land == nullptr) {
+                        throw std::runtime_error ("Cannot compute_mesh_movement as there is no land to move over");
+                    }
+                    if (this->land->navmesh == nullptr) {
+                        throw std::runtime_error ("Cannot compute_mesh_movement as there is no navmesh");
+                    }
+                    ti0_sv = this->land->navmesh->ti0;
                     cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
                     // Now we have moved, can compute instantaneous velocity
                     this->instantaneous_velocity = cam_to_scene.translation() - cam_to_scene_sv.translation();
