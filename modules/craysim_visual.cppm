@@ -60,6 +60,7 @@ export namespace craysim
         blender_axes,     // Set true to transform glTF into Blender's z-up axes
         max_fps,          // If true, poll, instead of fps
         path_from_csv,    // Move the agent from a pre-defined sequence of 2D coordinates that give it a path
+        csv_in_plane,     // If true, then csv playback is 2-dimensional. User has to provide the 'altitude' for the agent
         api_movement,     // Client code sets a vec/quat or mat for movement in the next render_and_poll()
         homing_mode,      // A flag for a 'go home' mode. It's up to client code to decide what to do with this.
         have_film_director, // user passed a json config file for film direction
@@ -880,6 +881,21 @@ export namespace craysim
             return this->compass_degrees_to_str (this->get_compass_heading());
         }
 
+        // A rotation only api
+        void api_rotate()
+        {
+            rotateCamerasLocallyAround (this->api_cam_rotn_angle,
+                                        this->api_cam_rotn_axis[0],
+                                        this->api_cam_rotn_axis[1],
+                                        this->api_cam_rotn_axis[2]);
+
+            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+
+            for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
+            if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
+            this->agent_coords->setViewMatrix (cam_to_scene);
+        }
+
         void api_move_over_land()
         {
             // Check vec/quat/matrix and then make mv_camframe
@@ -894,6 +910,8 @@ export namespace craysim
             sm::vec<float> mv_camframe = this->api_cam_mv;
             sm::vec<float> lastloc = cam_to_scene.translation();
             sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
+            if (this->land == nullptr) { std::cerr << "api_move_flying: land is nullptr!\n"; }
+            if (this->land->navmesh == nullptr) { std::cerr << "api_move_flying: land->navmesh is nullptr!\n"; }
             std::uint32_t ti0_sv = this->land->navmesh->ti0;
             try {
                 cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
@@ -908,10 +926,10 @@ export namespace craysim
                 std::string msg (e.what());
                 std::cout << "Exception: " << msg << std::endl;
                 if (msg.find ("off-edge:") == 0) {
-                    std::cout << "We went off the edge. Key move not possible. Don't crash.\n";
+                    std::cout << "We went off the edge. API move not possible. Don't crash.\n";
                     this->land->navmesh->ti0 = ti0_sv;
                 } else {
-                    std::cout << "key-command move was not possible...\n";
+                    std::cout << "API-commanded move was not possible...\n";
                     {
                         // Duplicated code from key_move...
                         std::cout << "Saving compute_mesh_movement data\n";
@@ -943,6 +961,47 @@ export namespace craysim
             for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
             if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
             this->agent_coords->setViewMatrix (cam_to_scene);
+        }
+
+        void api_move_flying ()
+        {
+            // Check vec/quat/matrix and then make mv_camframe
+            rotateCamerasLocallyAround (this->api_cam_rotn_angle,
+                                        this->api_cam_rotn_axis[0],
+                                        this->api_cam_rotn_axis[1],
+                                        this->api_cam_rotn_axis[2]);
+
+            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+
+            // move by this->api_cam_mv; along z (for now?)
+            sm::vec<float> mv_camframe = this->api_cam_mv;
+            sm::vec<float> lastloc = cam_to_scene.translation();
+            sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
+            if (this->land == nullptr) { std::cerr << "api_move_flying: land is nullptr!\n"; }
+            if (this->land->navmesh == nullptr) { std::cerr << "api_move_flying: land->navmesh is nullptr!\n"; }
+
+            // Simpler than api_move_over_land:
+            cam_to_scene.translate (mv_camframe);
+
+            this->set_camera_pose (cam_to_scene);
+
+            if (this->sim_opts.test (craysim::options::breadcrumbs_api)) {
+                ++this->move_counter;
+                this->add_breadcrumb (lastloc);
+            }
+
+            for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
+            if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
+            this->agent_coords->setViewMatrix (cam_to_scene);
+        }
+
+        void api_move()
+        {
+            if (this->sim_opts.test (craysim::options::move_by_flying)) {
+                this->api_move_flying();
+            } else {
+                this->api_move_over_land();
+            }
         }
 
         // Set camera pose for all cameras
@@ -1211,60 +1270,71 @@ export namespace craysim
 
                 sm::vec<float> fwds;
                 if (!this->csv_dirns.empty()) {
-                    // Prolly a bit hacky. Does not take account of this->scene_up.
+                    // Prolly a bit hacky. Does not take account of this->scene_up. Assumes it's the y axis.
                     fwds = { this->csv_dirns[this->move_counter][0], 0.0f, this->csv_dirns[this->move_counter][1] };
+                    std::cout << "Got fws from csv_dirns: " << fwds << std::endl;
                 } else {
                     fwds = nextloc - lastloc;
+                    std::cout << "Get fwds from nextloc - lastloc: " << nextloc << " - " << lastloc << " = " << fwds << std::endl;
                 }
 
                 if (fwds.length() > 0.0f) {
-                    sm::vec<float> ltstr = this->land_to_scene.translation(); // always the same
+                    sm::vec<float> ltstr = this->land_to_scene.translation(); // always the same (for each call to csv_playback)
                     sm::vec<float> cam_nextloc = nextloc;
                     cam_nextloc[0] += ltstr[0];
                     cam_nextloc[2] += ltstr[2]; // update only x and z
-                    //std::cout << "--> cam_nextloc: " << cam_nextloc << std::endl;
 
-                    sm::mat<float, 4> cnl;
-                    cnl.translate (cam_nextloc);
-                    this->set_camera_pose (cnl);
+                    if (this->sim_opts.test (craysim::options::csv_in_plane) == true) {
+                        // set the altitude from the last altitude
+                        cam_nextloc[1] = lastcamloc[1]; // Also a bit hacky; need to use scene_up.
+                        // position camera does the reorientation magic
+                        if (fwds.length() > 0.0f) {
+                            cam_to_scene = this->land->navmesh->position_camera (cam_nextloc, this->land_to_scene, 0.0f, fwds);
+                        } // else agent position has not changed from the last time.
+                    }
+
+                    this->set_camera_pose (cam_to_scene); // places camera at same height as nextloc, which is 0
                     cam_to_scene = mplot::compoundray::getCameraSpace (scene);
                 }
 
-                // Find triangle hits using the scene's 'up' direction.
-                sm::vec<float> camloc_mf = (this->land_to_scene.inverse() * cam_to_scene).translation();
-                sm::vec<float> vnrm = this->scene_up;
-                vnrm *= 4.0f;
-                auto[hp_scene, _ti0] = this->land->navmesh->find_triangle_hit (this->land_to_scene, camloc_mf + (vnrm / 2.0f), -2.0f * vnrm, this->last_ti);
-                this->last_ti = _ti0;
-                //std::cout << "--> Got hp_scene: " << hp_scene << std::endl;
-
-                if (_ti0 != std::numeric_limits<std::uint32_t>::max()) {
-
-                    // Set up our camera using the data obtained from find_triangle_hit()
-                    if (fwds.length() > 0.0f) {
-                        cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight, fwds);
-                    } // else agent position has not changed from the last time.
-
-
-                    if (cam_to_scene != sm::mat<float, 4>::identity()) {
-                        this->set_camera_pose (cam_to_scene);
-                    } else { std::cout << "csv_playback: cam_to_scene is identity?!\n"; }
-                    // else what to do if cam_to_scene is identity?
-
-                    // Now we have moved, can compute instantaneous velocity
-                    this->instantaneous_velocity = cam_to_scene.translation() - lastcamloc;
-                    //std::cout << "instant vel: " << this->instantaneous_velocity
-                    //          << "   cam_to_scene fwds = "
-                    //          << (cam_to_scene * sm::vec<>::uz()) << std::endl;
-                    this->distance_moved += this->instantaneous_velocity.length();
-                    //std::cout << "Distance moved is now " << this->distance_moved << std::endl;
-
+                if (this->sim_opts.test (craysim::options::csv_in_plane) == true) {
+                    // No more to do
                 } else {
-                    // Rather than throwing, could just move on to next in csv?
-                    cam_to_scene = mplot::compoundray::getCameraSpace (scene);
-                    std::cout << "Omit csv_positions[this->move_counter] = csv_positions[" << this->move_counter << "] = "
-                              << this->csv_positions[this->move_counter] << " (failed to find triangle hit)\n";
+                    // Find triangle hits using the scene's 'up' direction.
+                    sm::vec<float> camloc_mf = (this->land_to_scene.inverse() * cam_to_scene).translation();
+                    sm::vec<float> vnrm = this->scene_up;
+                    vnrm *= 4.0f;
+                    auto[hp_scene, _ti0] = this->land->navmesh->find_triangle_hit (this->land_to_scene, camloc_mf + (vnrm / 2.0f), -2.0f * vnrm, this->last_ti);
+                    this->last_ti = _ti0;
+
+                    if (_ti0 != std::numeric_limits<std::uint32_t>::max()) {
+
+                        // Set up our camera using the data obtained from find_triangle_hit()
+                        if (fwds.length() > 0.0f) {
+                            cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight, fwds);
+                        } // else agent position has not changed from the last time.
+
+                        if (cam_to_scene != sm::mat<float, 4>::identity()) {
+                            this->set_camera_pose (cam_to_scene);
+                        } else { std::cout << "csv_playback: cam_to_scene is identity?!\n"; }
+                        // else what to do if cam_to_scene is identity?
+
+                        // Now we have moved, can compute instantaneous velocity
+                        //this->instantaneous_velocity = cam_to_scene.translation() - lastcamloc;
+                        //this->distance_moved += this->instantaneous_velocity.length();
+
+                    } else {
+                        // Rather than throwing, could just move on to next in csv?
+                        cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+                        std::cout << "Omit csv_positions[this->move_counter] = csv_positions[" << this->move_counter << "] = "
+                                  << this->csv_positions[this->move_counter] << " (failed to find triangle hit)\n";
+                    }
                 }
+
+                // Can this go here? Removes two instances above
+                // Now we have moved, can compute instantaneous velocity
+                this->instantaneous_velocity = cam_to_scene.translation() - lastcamloc;
+                this->distance_moved += this->instantaneous_velocity.length();
 
                 if (this->sim_opts.test (craysim::options::breadcrumbs_csv)) {
                     ++this->move_counter;
@@ -1402,13 +1472,13 @@ export namespace craysim
                 } else if (this->sim_opts.any_of ({craysim::options::api_movement, craysim::options::homing_mode})) {
                     // React to movements commanded by vec/quaternion or transformation matrix
                     // (i.e. by client code).
-                    this->api_move_over_land();
+                    this->api_move();
                 } else {
                     this->key_move (this->fps_profiler.fps_mean);
                 }
             } else if (this->vstate.test (craysim::visual<glver>::state::paused) == true
                        && this->sim_opts.any_of ({craysim::options::api_movement, craysim::options::homing_mode})) {
-                this->api_move_over_land(); // BUT don't inc move counter! This enables rotating while paused
+                this->api_rotate(); // BUT don't inc move counter! This enables rotating while paused
             }
             std::uint32_t camidx = 0;
             // Call the compound-ray ray casting method to recompute the compound-eye view of the scene
