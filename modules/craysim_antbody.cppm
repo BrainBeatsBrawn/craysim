@@ -145,7 +145,7 @@ export namespace craysim
                 tfm.rotate (sm::vec<>::ux(), sm::mathconst<float>::pi_over_2);
                 this->computeMarkedRing (conf.get_vec<float, 3>("head_loc"),
                                          mplot::colour::floralwhite,
-                                         mplot::colour::crimson, sm::mathconst<float>::pi_over_2,
+                                         mplot::colour::blue, sm::mathconst<float>::pi_over_2,
                                          rd, rd / 10.0f, 50, tfm);
             }
         }
