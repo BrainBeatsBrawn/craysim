@@ -89,6 +89,7 @@ export namespace craysim
         std::string hovh = {};
         std::int32_t w = -1; // user-requested width
         std::int32_t h = -1;
+        float agent_coord_len = 1.0f;
         bool make_movie = false;
     };
 
@@ -134,6 +135,8 @@ export namespace craysim
                 rtn.opts |= craysim::options::debug_mv;
             } else if (arg == "-H") {
                 rtn.hovh = std::string(argv[++i]);
+            } else if (arg == "-L") {
+                rtn.agent_coord_len = std::stof (argv[++i]);
             } else if (arg == "-m") {
                 rtn.make_movie = true;
             }
@@ -273,8 +276,8 @@ export namespace craysim
             this->agent_eyevisual_gamma = _agent_gamma;
             this->setup_eyevisual();
             this->setup_breadcrumbs (1000u); // default 1000 breadcrumbs
-            this->setup_agent_coords();
-            this->setup_compass_coords();
+            this->setup_agent_coords (prog_opts.agent_coord_len);
+            this->setup_compass_coords (prog_opts.agent_coord_len);
 
             // For json film direction, first try a path based on any csv path we have
             if (prog_opts.json_config_path.empty() && !prog_opts.csv_path.empty()) {
@@ -441,28 +444,27 @@ export namespace craysim
             this->isvp = this->addVisualModel (isv);
         }
 
-        void setup_agent_coords()
+        void setup_agent_coords (const float len)
         {
             // Make CoordArrows axes to show our camera's localspace (and to help find our tiny ant)
             auto antca = std::make_unique<mplot::CoordArrows<glver>> (sm::vec<>{});
             antca->set_parent (this->get_id());
             antca->em = 0.0f; // labels don't work so well
-            float len = 2.0f;
             antca->lengths = { len, len, len };
-            antca->thickness = 1.0f;
-            antca->endsphere_size = 1.2f;
+            antca->thickness = 0.6f;
             antca->finalize();
             this->agent_coords = this->addVisualModel (antca);
             this->agent_coords->name = "agent";
             this->agent_coords->setViewMatrix (this->initial_camera_space);
         }
 
-        void setup_compass_coords()
+        void setup_compass_coords (const float len)
         {
             auto compass_coords_up = std::make_unique<mplot::CoordArrows<glver>> (sm::vec<float>{0.0f});
             compass_coords_up->set_parent (this->get_id());
             compass_coords_up->em = 0.0f;
-            compass_coords_up->lengths = {1.5f, 1.5f, 1.5f};
+            compass_coords_up->lengths = {len, len, len};
+            compass_coords_up->lengths *= 1.2f;
             compass_coords_up->thickness = 0.3f;
             compass_coords_up->finalize();
             this->compass_coords = this->addVisualModel (compass_coords_up);
