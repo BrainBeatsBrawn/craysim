@@ -60,6 +60,7 @@ export namespace craysim
         blender_axes,     // Set true to transform glTF into Blender's z-up axes
         max_fps,          // If true, poll, instead of fps
         path_from_csv,    // Move the agent from a pre-defined sequence of 2D coordinates that give it a path
+        save_csv_positions, // Write out the actual 3D positions that the CSV found on the landscape out to a file
         api_movement,     // Client code sets a vec/quat or mat for movement in the next render_and_poll()
         homing_mode,      // A flag for a 'go home' mode. It's up to client code to decide what to do with this.
         have_film_director, // user passed a json config file for film direction
@@ -1118,6 +1119,14 @@ export namespace craysim
                         cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight, fwds);
                     } // else agent position has not changed from the last time.
 
+                    if (this->sim_opts.test (craysim::options::save_csv_positions)) {
+                        if (this->csv_found_positions.empty()) {
+                            this->csv_found_positions.resize (this->csv_positions.size());
+                        }
+                        this->csv_found_positions[this->move_counter] = cam_to_scene.translation();
+                        std::cout << this->csv_found_positions[this->move_counter] << std::endl;
+                    }
+
 
                     if (cam_to_scene != sm::mat<float, 4>::identity()) {
                         this->set_camera_pose (cam_to_scene);
@@ -1348,6 +1357,20 @@ export namespace craysim
                 this->record.add_contained_vals ("/ommatidia/focalPointOffset", o_fo);
                 std::cout << "Completed recording" << std::endl;
             }
+            if (!this->csv_found_positions.empty()) {
+                std::cout << "Write out found positions...\n";
+                std::ofstream fout ("./csv_found_positions.csv", std::ios::out | std::ios::trunc);
+                if (fout.is_open()) {
+                    for (auto p : this->csv_found_positions) {
+                        fout << p.str_comma_separated() << std::endl;
+                    }
+                    fout.close();
+                } else {
+                    std::cout << "Failed to open ./csv_found_positions.csv to write out 3D csv positions\n";
+                }
+            } else {
+                std::cout << "No found positions to write out\n";
+            }
         }
 
         void set_hoverheight (const std::string& cmd_line_str, const float default_height = 0.01f)
@@ -1508,6 +1531,8 @@ export namespace craysim
         sm::vvec<sm::vec<float, 2>> csv_positions;
         sm::vvec<sm::vec<float, 2>> csv_dirns;
         sm::vvec<std::uint32_t> csv_flags;
+        // The positions in model space that were found on the landscape for csv_positions
+        sm::vvec<sm::vec<float, 3>> csv_found_positions;
         // Home/nest locations. Client code can populate this and make use of it in any way that is useful.
         sm::vvec<sm::vec<float>> home_locations;
         // It may be useful to define some target locations, too.
