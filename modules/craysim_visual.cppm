@@ -10,6 +10,8 @@ module;
 #include <cmath>
 #include <limits>
 #include <map>
+#include <deque>
+#include <random>
 
 #include <MulticamScene.h>
 #include <libEyeRenderer.h> // getCurrentEyeSamplesPerOmmatidium
@@ -1381,6 +1383,99 @@ export namespace craysim
         // Get the transform matrix defining the pose of the camera/agent. That's stored in agent_coords
         sm::mat<float, 4> get_camera_pose() const { return this->agent_coords->getViewMatrix(); }
 
+        // Enable/disable keypress microsaccadic motion (jittered sub-steps for WASD).
+        void enable_microsaccadic_motion (const bool enable)
+        {
+            this->microsaccadic_motion_enabled = enable;
+            if (!enable) {
+                this->pending_submoves.clear();
+                this->new_xz_points.clear();
+                this->pending_press_indices.clear();
+                this->pending_press_remaining.clear();
+                this->applied_submove_this_frame = false;
+                if (this->microsaccadic_owns_api_move) {
+                    this->sim_opts.reset (craysim::options::api_movement);
+                    this->api_cam_mv = {};
+                    this->microsaccadic_owns_api_move = false;
+                }
+            }
+        }
+
+        bool microsaccadic_motion_is_enabled() const { return this->microsaccadic_motion_enabled; }
+
+        void set_microsaccadic_n_submoves (const int n)
+        {
+            this->microsaccadic_n_submoves = std::max (1, n);
+        }
+
+        void set_microsaccadic_heading_sigma_deg (const float sigma_deg)
+        {
+            this->microsaccadic_heading_sigma_deg = std::max (0.0f, sigma_deg);
+        }
+
+        // Called by client code before render_and_poll() to schedule one sub-step movement.
+        void prepare_submovement_for_frame()
+        {
+            this->applied_submove_this_frame = false;
+            if (!this->microsaccadic_motion_enabled) { return; }
+
+            if (this->pending_submoves.empty()) {
+                if (this->microsaccadic_owns_api_move) {
+                    this->sim_opts.reset (craysim::options::api_movement);
+                    this->api_cam_mv = {};
+                    this->microsaccadic_owns_api_move = false;
+                }
+                return;
+            }
+
+            this->sim_opts.set (craysim::options::api_movement);
+            this->api_cam_mv = this->pending_submoves.front();
+            this->pending_submoves.pop_front();
+            this->applied_submove_this_frame = true;
+            this->microsaccadic_owns_api_move = true;
+        }
+
+        // Called by client code after render_and_poll() to capture the camera x-z trajectory.
+        void finish_submovement_for_frame()
+        {
+            if (!this->microsaccadic_motion_enabled || !this->applied_submove_this_frame) { return; }
+
+            const sm::vec<float> cam_pos = this->get_camera_pose().translation();
+            const sm::vec<float, 2> xz = { cam_pos[0], cam_pos[2] };
+            this->new_xz_points.push_back (xz);
+
+            if (!this->pending_press_remaining.empty()) {
+                const std::size_t press_index = this->pending_press_indices.front();
+                this->submovement_xz_by_press[press_index].push_back (xz);
+                --this->pending_press_remaining.front();
+                if (this->pending_press_remaining.front() == 0u) {
+                    this->pending_press_remaining.pop_front();
+                    this->pending_press_indices.pop_front();
+                }
+            }
+        }
+
+        bool pop_new_xz_point (sm::vec<float, 2>& out)
+        {
+            if (this->new_xz_points.empty()) { return false; }
+            out = this->new_xz_points.front();
+            this->new_xz_points.pop_front();
+            return true;
+        }
+
+        const std::vector<std::vector<sm::vec<float, 2>>>& get_submovement_xz_history() const
+        {
+            return this->submovement_xz_by_press;
+        }
+
+        void clear_submovement_history()
+        {
+            this->submovement_xz_by_press.clear();
+            this->new_xz_points.clear();
+            this->pending_press_indices.clear();
+            this->pending_press_remaining.clear();
+        }
+
         /*
          * Is the home location to the left of the agent/camera?
          *
@@ -1580,6 +1675,71 @@ export namespace craysim
         }
         void move_camera (sm::vec<float>& v) { this->api_cam_mv = v; }
 
+        // Microsaccadic key-motion state. When enabled, WASD keypresses are converted into
+        // jittered sub-steps queued for API movement over subsequent frames.
+        bool microsaccadic_motion_enabled = false;
+        int microsaccadic_n_submoves = 8;
+        float microsaccadic_heading_sigma_deg = 18.0f;
+
+    private:
+        bool is_translation_key (const int key) const
+        {
+            return key == mplot::key::w
+                || key == mplot::key::s
+                || key == mplot::key::a
+                || key == mplot::key::d;
+        }
+
+        void enqueue_jittered_submoves (const int key)
+        {
+            if (!this->microsaccadic_motion_enabled || this->microsaccadic_n_submoves <= 0) { return; }
+
+            sm::vec<float> step_dir = {};
+            if (key == mplot::key::w) {
+                step_dir = sm::vec<float>::uz();
+            } else if (key == mplot::key::s) {
+                step_dir = -sm::vec<float>::uz();
+            } else if (key == mplot::key::a) {
+                step_dir = sm::vec<float>::ux();
+            } else if (key == mplot::key::d) {
+                step_dir = -sm::vec<float>::ux();
+            }
+
+            sm::vec<float> lateral_dir = this->scene_up.cross (step_dir);
+            if (lateral_dir.length() > 0.0f) { lateral_dir.renormalize(); }
+
+            float fps = this->fps_profiler.fps_mean;
+            if (fps < 1.0f) { fps = 60.0f; }
+
+            const float full_step = this->kcmd_speed / fps;
+            const float substep_forward = full_step / static_cast<float> (this->microsaccadic_n_submoves);
+            const float sigma_rad = this->microsaccadic_heading_sigma_deg * sm::mathconst<float>::deg2rad;
+            std::normal_distribution<float> heading_error_rad (0.0f, sigma_rad);
+
+            const std::size_t press_index = this->submovement_xz_by_press.size();
+            this->submovement_xz_by_press.emplace_back();
+            this->pending_press_indices.push_back (press_index);
+            this->pending_press_remaining.push_back (static_cast<std::size_t> (this->microsaccadic_n_submoves));
+
+            for (int i = 0; i < this->microsaccadic_n_submoves; ++i) {
+                const float dtheta = heading_error_rad (this->microsaccadic_rng);
+                const float lateral_step = substep_forward * std::tan (dtheta);
+                const sm::vec<float> submove = (substep_forward * step_dir) + (lateral_step * lateral_dir);
+                this->pending_submoves.push_back (submove);
+            }
+        }
+
+        std::mt19937 microsaccadic_rng = std::mt19937 (std::random_device{}());
+        std::deque<sm::vec<float>> pending_submoves;
+        std::deque<sm::vec<float, 2>> new_xz_points;
+        std::vector<std::vector<sm::vec<float, 2>>> submovement_xz_by_press;
+        std::deque<std::size_t> pending_press_indices;
+        std::deque<std::size_t> pending_press_remaining;
+        bool applied_submove_this_frame = false;
+        bool microsaccadic_owns_api_move = false;
+
+    public:
+
         // Get the camera's key-commanded movement vector to give speed in model world at the current FPS
         sm::vec<float, 3> get_movement_vector (const float fps)
         {
@@ -1654,6 +1814,16 @@ export namespace craysim
         void key_callback_extra (int key, int scancode, int action, int mods) override
         {
             if (this->vstate.test (state::freeze)) { return; } // Don't respond to movement keys
+
+            if (this->microsaccadic_motion_enabled
+                && this->is_translation_key (key)
+                && !(mods & mplot::keymod::shift)) {
+
+                if (action == mplot::keyaction::press) {
+                    this->enqueue_jittered_submoves (key);
+                }
+                return;
+            }
 
             // Process press/repeat key actions (none will work with Ctrl or Shift)
             if (action == mplot::keyaction::press && !(mods & mplot::keymod::shift)) {
