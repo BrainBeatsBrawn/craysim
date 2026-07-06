@@ -1124,7 +1124,7 @@ export namespace craysim
                             this->csv_found_positions.resize (this->csv_positions.size());
                         }
                         this->csv_found_positions[this->move_counter] = cam_to_scene.translation();
-                        std::cout << this->csv_found_positions[this->move_counter] << std::endl;
+                        //std::cout << this->csv_found_positions[this->move_counter] << std::endl;
                     }
 
 
