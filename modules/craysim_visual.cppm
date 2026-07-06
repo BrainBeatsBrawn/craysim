@@ -1303,7 +1303,9 @@ export namespace craysim
                         } // else agent position has not changed from the last time.
                     }
 
-                    this->set_camera_pose (cam_to_scene); // places camera at same height as nextloc, which is 0
+                    sm::mat<float, 4> cnl;
+                    cnl.translate (cam_nextloc);
+                    this->set_camera_pose (cnl);
                     cam_to_scene = mplot::compoundray::getCameraSpace (scene);
                 }
 
