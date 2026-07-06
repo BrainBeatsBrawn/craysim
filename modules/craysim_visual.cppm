@@ -1282,10 +1282,8 @@ export namespace craysim
                 if (!this->csv_dirns.empty()) {
                     // Prolly a bit hacky. Does not take account of this->scene_up. Assumes it's the y axis.
                     fwds = { this->csv_dirns[this->move_counter][0], 0.0f, this->csv_dirns[this->move_counter][1] };
-                    std::cout << "Got fws from csv_dirns: " << fwds << std::endl;
                 } else {
                     fwds = nextloc - lastloc;
-                    std::cout << "Get fwds from nextloc - lastloc: " << nextloc << " - " << lastloc << " = " << fwds << std::endl;
                 }
 
                 if (fwds.length() > 0.0f) {
