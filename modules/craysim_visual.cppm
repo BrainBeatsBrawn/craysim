@@ -1390,6 +1390,7 @@ export namespace craysim
             if (!enable) {
                 this->pending_submoves.clear();
                 this->new_xz_points.clear();
+                this->completed_presses.clear();
                 this->pending_press_indices.clear();
                 this->pending_press_remaining.clear();
                 this->applied_submove_this_frame = false;
@@ -1449,6 +1450,7 @@ export namespace craysim
                 this->submovement_xz_by_press[press_index].push_back (xz);
                 --this->pending_press_remaining.front();
                 if (this->pending_press_remaining.front() == 0u) {
+                    this->completed_presses.push_back (true);
                     this->pending_press_remaining.pop_front();
                     this->pending_press_indices.pop_front();
                 }
@@ -1463,6 +1465,13 @@ export namespace craysim
             return true;
         }
 
+        bool pop_completed_press()
+        {
+            if (this->completed_presses.empty()) { return false; }
+            this->completed_presses.pop_front();
+            return true;
+        }
+
         const std::vector<std::vector<sm::vec<float, 2>>>& get_submovement_xz_history() const
         {
             return this->submovement_xz_by_press;
@@ -1472,6 +1481,7 @@ export namespace craysim
         {
             this->submovement_xz_by_press.clear();
             this->new_xz_points.clear();
+            this->completed_presses.clear();
             this->pending_press_indices.clear();
             this->pending_press_remaining.clear();
         }
@@ -1732,6 +1742,7 @@ export namespace craysim
         std::mt19937 microsaccadic_rng = std::mt19937 (std::random_device{}());
         std::deque<sm::vec<float>> pending_submoves;
         std::deque<sm::vec<float, 2>> new_xz_points;
+        std::deque<bool> completed_presses;
         std::vector<std::vector<sm::vec<float, 2>>> submovement_xz_by_press;
         std::deque<std::size_t> pending_press_indices;
         std::deque<std::size_t> pending_press_remaining;
