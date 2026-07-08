@@ -418,7 +418,7 @@ export namespace craysim
             auto antca = std::make_unique<mplot::CoordArrows<glver>> (sm::vec<>{});
             antca->set_parent (this->get_id());
             antca->em = 0.0f; // labels don't work so well
-            float len = 2.0f;
+            float len = 0.1f;
             antca->lengths = { len, len, len };
             antca->thickness = 1.0f;
             antca->endsphere_size = 1.2f;
