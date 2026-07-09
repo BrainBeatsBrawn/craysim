@@ -1005,13 +1005,29 @@ export namespace craysim
             // A random walk mode
             if (!this->rrg || this->vstate.test (craysim::visual<glver>::state::walk) == false) { return; }
 
-            // set rotation and step length according to the Stone paper
-            this->rrg->step();
-            // rrg.omega is the angular speed rrg.speed is the linear speed
-            rotateCamerasLocallyAround (this->rrg->omega, 0.0f, 1.0f, 0.0f);
-            cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            // A new direction is chosen (rotation) and a new distance-to-travel is decided
+            // (translation) only once any previous translation phase has been fully carried out.
+            // If microsaccadic motion is disabled, that translation phase is always exactly one
+            // submove, so behaviour is unchanged: rotate, then translate the full step in one go.
+            // If it's enabled, the translation phase is instead broken into
+            // microsaccadic_n_submoves jittered sub-steps, one consumed per subsequent call here.
+            if (this->walk_pending_submoves.empty()) {
+                // set rotation and step length according to the Stone paper
+                this->rrg->step();
+                // rrg.omega is the angular speed rrg.speed is the linear speed
+                rotateCamerasLocallyAround (this->rrg->omega, 0.0f, 1.0f, 0.0f);
+                cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+
+                if (this->microsaccadic_motion_enabled) {
+                    this->enqueue_walk_jittered_submoves (this->rrg->speed);
+                } else {
+                    this->walk_pending_submoves.push_back (sm::vec<float>{ 0.0f, 0.0f, this->rrg->speed });
+                }
+            }
+
             // ti0, mv_camframe, cam_to_scene to save.
-            sm::vec<float> mv_camframe = { 0, 0, this->rrg->speed };
+            sm::vec<float> mv_camframe = this->walk_pending_submoves.front();
+            this->walk_pending_submoves.pop_front();
             sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
             std::uint32_t ti0_sv = this->land->navmesh->ti0;
             try {
@@ -1031,6 +1047,9 @@ export namespace craysim
                 if (msg.find ("off-edge:") == 0) {
                     std::cout << "We went off the edge. Change direction (rrg->about_turn()).\n";
                     this->rrg->about_turn();
+                    // Discard any remaining jittered sub-steps of the abandoned translation phase;
+                    // the new heading needs a fresh direction+distance decision next frame.
+                    this->walk_pending_submoves.clear();
                     this->land->navmesh->ti0 = ti0_sv;
                 } else {
                     this->sim_opts.set (craysim::options::max_fps, false); // don't burn electricity after exception
@@ -1739,6 +1758,25 @@ export namespace craysim
             }
         }
 
+        // Split one random-walk translation phase (of the given forward distance, in the
+        // just-rotated-to heading) into microsaccadic_n_submoves jittered sub-steps, queued in
+        // walk_pending_submoves for walk_over_land() to consume one per frame. Mirrors
+        // enqueue_jittered_submoves above, but for the walk's own forward/speed step rather than a
+        // WASD keypress, so it doesn't touch the keypress bookkeeping (submovement_xz_by_press etc).
+        void enqueue_walk_jittered_submoves (const float speed)
+        {
+            const float substep_forward = speed / static_cast<float> (this->microsaccadic_n_submoves);
+            const float sigma_rad = this->microsaccadic_heading_sigma_deg * sm::mathconst<float>::deg2rad;
+            std::normal_distribution<float> heading_error_rad (0.0f, sigma_rad);
+
+            for (int i = 0; i < this->microsaccadic_n_submoves; ++i) {
+                const float dtheta = heading_error_rad (this->microsaccadic_rng);
+                const float lateral_step = substep_forward * std::tan (dtheta);
+                const sm::vec<float> submove = (substep_forward * sm::vec<float>::uz()) + (lateral_step * sm::vec<float>::ux());
+                this->walk_pending_submoves.push_back (submove);
+            }
+        }
+
         std::mt19937 microsaccadic_rng = std::mt19937 (std::random_device{}());
         std::deque<sm::vec<float>> pending_submoves;
         std::deque<sm::vec<float, 2>> new_xz_points;
@@ -1748,6 +1786,10 @@ export namespace craysim
         std::deque<std::size_t> pending_press_remaining;
         bool applied_submove_this_frame = false;
         bool microsaccadic_owns_api_move = false;
+
+        // Queued jittered sub-steps for the random walk's translation phase (walk_over_land()),
+        // when microsaccadic motion is enabled. Holds a single full-step move when disabled.
+        std::deque<sm::vec<float>> walk_pending_submoves;
 
     public:
 
@@ -1828,7 +1870,8 @@ export namespace craysim
 
             if (this->microsaccadic_motion_enabled
                 && this->is_translation_key (key)
-                && !(mods & mplot::keymod::shift)) {
+                && !(mods & mplot::keymod::shift)
+                && !(mods & mplot::keymod::control)) {
 
                 if (action == mplot::keyaction::press) {
                     this->enqueue_jittered_submoves (key);
@@ -1837,7 +1880,9 @@ export namespace craysim
             }
 
             // Process press/repeat key actions (none will work with Ctrl or Shift)
-            if (action == mplot::keyaction::press && !(mods & mplot::keymod::shift)) {
+            if (action == mplot::keyaction::press
+                && !(mods & mplot::keymod::shift)
+                && !(mods & mplot::keymod::control)) {
                 if (key == mplot::key::w) {
                     this->vstate.reset (state::paused);
                     this->move_state.set (move_sense::forward);
