@@ -291,6 +291,7 @@ export namespace craysim
                 candidate_json += ".json";
                 std::cout << "Attempt to open csv's partner json: " << candidate_json << std::endl;
                 this->setup_film_director (candidate_json);
+                if (!cpaths.empty()) { this->first_csv = cpaths[0]; }
 
             } else {
                 if (!prog_opts.json_config_path.empty()) {
@@ -1570,15 +1571,16 @@ export namespace craysim
                 std::cout << "Completed recording" << std::endl;
             }
             if (!this->csv_found_positions.empty()) {
-                std::cout << "Write out found positions...\n";
-                std::ofstream fout ("./csv_found_positions.csv", std::ios::out | std::ios::trunc);
+                std::string fp_filename = this->first_csv + ".3d.csv";
+                std::cout << "Write out found 3D positions to " << fp_filename << "\n";
+                std::ofstream fout (fp_filename, std::ios::out | std::ios::trunc);
                 if (fout.is_open()) {
                     for (auto p : this->csv_found_positions) {
                         fout << p.str_comma_separated() << std::endl;
                     }
                     fout.close();
                 } else {
-                    std::cout << "Failed to open ./csv_found_positions.csv to write out 3D csv positions\n";
+                    std::cout << "Failed to open " << fp_filename << " to write out 3D csv positions\n";
                 }
             } else {
                 std::cout << "No found positions to write out\n";
@@ -1754,6 +1756,9 @@ export namespace craysim
         std::uint32_t last_ti = std::numeric_limits<std::uint32_t>::max();
         // This is the height above the landscape to place the camera/agent. Set it suitably in your application.
         float hoverheight = 0.01f;
+
+        // Holds the first csv file name (there may be multiple). Used for found csv saving.
+        std::string first_csv = {};
 
         // Random route generation object
         std::unique_ptr<sm::random_walk<float>> rrg;
