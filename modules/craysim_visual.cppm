@@ -1117,32 +1117,44 @@ export namespace craysim
                 std::cout << "Desired heading (degrees in world frame) : " << desired_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
                 std::cout << "delta_heading (degrees in camera frame) : " << delta_heading * 360.0f/sm::mathconst<float>::two_pi << std::endl;
             } else {
-                // Head along the vector sum of the goal direction and CAD. cad is a unit vector
-                // expressed relative to the agent's CURRENT heading (per compute_cad's azimuth
-                // convention: element 0 is cos, element 1 is sin of that relative angle), so the
-                // goal direction must be converted to the same relative, unit-vector form before
-                // summing -- world-frame goal_pos - cam_pos is a different reference frame
-                // (world, not agent-relative) and a different scale (arena distance, not unit
-                // length), so it can't be combined with cad directly.
+                // Head along the vector sum of the goal direction and CAD, both expressed as
+                // (x, z) unit vectors in the agent-local horizontal plane -- same convention as
+                // fwd/current_heading_rad/desired_heading_rad above: z is the rotation's reference
+                // axis (angle 0), x is 90deg anticlockwise from z, and a positive angle (matching
+                // atan2(x, z), and matching a positive angle passed to rotateCamerasLocallyAround)
+                // is an anticlockwise/LEFT turn. So a relative angle theta is the vector
+                // (sin(theta), cos(theta)) here, not (cos(theta), sin(theta)) -- e.g. a goal
+                // 100deg to the left of centre is (0.98, -0.17): mostly +x/left, slightly -z/back.
                 //
-                // compute_comanv/compute_cad's azimuth convention increases towards the agent's
-                // RIGHT (it's built directly from increasing eye-image column index), whereas
-                // rotateCamerasLocallyAround (and this function's world-frame atan2(x,z) heading
-                // maths, verified against it above in the goal-seeking branch) takes a positive
-                // angle to mean turning LEFT -- the opposite handedness. Mirror cad into that
-                // convention (negate its sin/y component, i.e. negate its azimuth) before using
-                // it as a heading contribution, otherwise the agent turns towards the obstacle
-                // CAD is meant to steer it away from.
-                const sm::vec<float, 2> cad_rotation_frame = { cad[0], -cad[1] };
+                // cad is a unit vector in compute_cad's azimuth convention instead (element 0 is
+                // cos, element 1 is sin of an angle that increases towards the agent's RIGHT --
+                // built directly from increasing eye-image column index), the opposite handedness
+                // to the above. Converting it to this function's (x, z) convention means negating
+                // for the handedness flip (right- to left-handed) *and* swapping which element is
+                // x and which is z (cos/sin to sin/cos): x = -cad[1], z = cad[0].
+                const sm::vec<float, 2> cad_rotation_frame = { -cad[1], cad[0] };
 
                 desired_heading_rad = std::atan2 (goal_pos[0] - cam_pos[0], goal_pos[2] - cam_pos[2]);
                 const float goal_relative_heading_rad = desired_heading_rad - current_heading_rad;
-                const sm::vec<float, 2> goal_dir = { std::cos (goal_relative_heading_rad), std::sin (goal_relative_heading_rad) };
-                const sm::vec<float, 2> combined_dir = goal_dir + cad_rotation_frame;
-                delta_heading = std::atan2 (combined_dir[1], combined_dir[0]);
+                const sm::vec<float, 2> goal_dir = { std::sin (goal_relative_heading_rad), std::cos (goal_relative_heading_rad) };
+
+                // Blend goal_dir and cad_rotation_frame by a fixed weighted average -- bypassing
+                // comanv_sigmoid() for now (left defined above, unused here; see the commented-out
+                // block below for how to reinstate the comanv_magnitude-dependent blend).
+                constexpr float cad_weight = 0.5f;
+                constexpr float goal_weight = 0.5f;
+                // const float sigmoid_out = this->comanv_sigmoid (comanv_magnitude);
+                // const float cad_weight = (sigmoid_out + 1.0f) * 0.5f;
+                // const float goal_weight = 1.0f - cad_weight;
+                const sm::vec<float, 2> combined_dir = (goal_weight * goal_dir) + (cad_weight * cad_rotation_frame);
+                // Decode as (x, z), matching the encoding above -- atan2(x, z), same as
+                // current_heading_rad/desired_heading_rad -- not atan2(z, x).
+                delta_heading = std::atan2 (combined_dir[0], combined_dir[1]);
 
                 std::cout << "Avoiding obstacle!!!!" << std::endl;
                 std::cout << "can_mag (" << comanv_magnitude << ") GREATER THAN threshold. (" << can_threshold << ")" << std::endl;
+                std::cout << "cad_weight : " << cad_weight << ", goal_weight : " << goal_weight << std::endl;
+                std::cout << "fwd vector : " << fwd[0] << ", " << fwd[2] << std::endl; 
                 std::cout << "desired heading (deg) : " <<  desired_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
                 std::cout << "current heading (deg) : " <<  current_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
                 std::cout << "goal_relative_heading (deg) : " <<  goal_relative_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
@@ -1825,6 +1837,25 @@ export namespace craysim
         // Threshold on comanv_magnitude used by towards_goal_avoiding_collisions() to decide
         // between heading for the goal and turning to avoid a collision.
         float can_threshold = 1.0f;
+
+        // Steepness of comanv_sigmoid() below -- larger values make the goal/CAD blend switch
+        // more abruptly around comanv_sigmoid_origin; smaller values make the transition more
+        // gradual. Exposed so it can be tuned at runtime.
+        float comanv_sigmoid_slope = 1.0f;
+
+        // comanv_magnitude at which comanv_sigmoid() below is centred (returns 0 there). Exposed
+        // so it can be tuned at runtime.
+        float comanv_sigmoid_origin = 0.2f;
+
+        // Maps comanv_magnitude onto [-1, 1], symmetric (odd) about comanv_sigmoid_origin: 0 at
+        // comanv_magnitude == comanv_sigmoid_origin, tending to +1 as comanv_magnitude grows well
+        // above that and to -1 as it falls well below. Used by towards_goal_avoiding_collisions()
+        // to blend the goal heading and CAD -- see its use there for how the return value maps to
+        // a blend weight.
+        float comanv_sigmoid (const float comanv_magnitude) const
+        {
+            return std::tanh (this->comanv_sigmoid_slope * (comanv_magnitude - this->comanv_sigmoid_origin));
+        }
 
     private:
         bool is_translation_key (const int key) const
