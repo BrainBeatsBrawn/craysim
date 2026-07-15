@@ -10,6 +10,7 @@ export namespace craysim
     // Parameters for our ant model
     const char* ant_json =
     "{\n"
+    "\"ring_diameter\" : 0.1,\n"
     "\"head_loc\" : [0, -0.0001, 0.0001],\n"
     "\"head_abc\" : [0.0005, 0.00045, 0.00065],\n"
     "\"head_rotn_angle\" : 0.7,\n"
