@@ -1330,7 +1330,6 @@ export namespace craysim
                                 this->csv_found_positions.resize (this->csv_positions.size());
                             }
                             this->csv_found_positions[this->move_counter] = cam_to_scene.translation();
-                            std::cout << this->csv_found_positions[this->move_counter] << std::endl;
                         }
 
                         if (cam_to_scene != sm::mat<float, 4>::identity()) {
@@ -1509,7 +1508,8 @@ export namespace craysim
                 this->ommatidias[camidx] = &scene->m_ommVecs[camidx];
 
                 // if csv mode, then save the data (camidx 0 only)
-                if (camidx == 0 && this->sim_opts.all_of ({craysim::options::path_from_csv, craysim::options::save_hdf5})) {
+                if (camidx == 0 && this->sim_opts.all_of ({craysim::options::path_from_csv, craysim::options::save_hdf5})
+                    && this->csv_positions.size() > this->move_counter) {
                     std::cout << "Saving frame...\n";
                     std::string ommframe = "/ommatidia_data/frame_" + std::to_string (this->move_counter);
                     try {
