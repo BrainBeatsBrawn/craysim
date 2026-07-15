@@ -1081,6 +1081,90 @@ export namespace craysim
             this->agent_coords->setViewMatrix (cam_to_scene);
         }
 
+        // "towards_goal_avoiding_collisions" mode. Call once per step decision: at start-up, and
+        // again each time client code sees a completed press (v.pop_completed_press()) together
+        // with that press's comanv_magnitude/cad (computed elsewhere, e.g. engelhaaf::plotting,
+        // from that step's optic flow -- this module has no notion of optic flow itself, hence
+        // they're parameters here rather than members).
+        //
+        // comanv_magnitude <= can_threshold: rotate to face goal_pos (world x,z) and step forward.
+        // comanv_magnitude >  can_threshold: rotate to face cad -- expressed as a heading offset
+        //   relative to the agent's CURRENT heading, per engelhaaf::plotting::compute_cad's
+        //   azimuth convention -- and step forward.
+        //
+        // Requires enable_microsaccadic_motion(true): steps are queued via the same
+        // jittered-submove mechanism WASD keypresses use.
+        void towards_goal_avoiding_collisions (
+            const sm::vec<float>& goal_pos,
+            const float comanv_magnitude,
+            const sm::vec<float, 2>& cad)
+        {
+            const sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+
+            float delta_heading = 0.0f;
+            float desired_heading_rad = 0.0f;
+            const sm::vec<float> cam_pos = cam_to_scene.translation();
+            const sm::vec<float> fwd = cam_to_scene.col(2).less_one_dim();
+            const float current_heading_rad = std::atan2 (fwd[0], fwd[2]);
+            std::cout << " = = = = = Deciding whether to got to goal or avoid and obstacle = = = = = " << std::endl;
+            if (comanv_magnitude <= this->can_threshold) {
+                // Desired heading is just the location of the goal w.r.t to the current agent position
+                desired_heading_rad = std::atan2 (goal_pos[0] - cam_pos[0], goal_pos[2] - cam_pos[2]);
+                delta_heading = desired_heading_rad - current_heading_rad;
+
+                std::cout << "Heading to Goal!!!!" << std::endl;
+                std::cout << "can_mag (" << comanv_magnitude << ") < threshold. (" << can_threshold << ")" << std::endl;
+                std::cout << "Desired heading (degrees in world frame) : " << desired_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
+                std::cout << "delta_heading (degrees in camera frame) : " << delta_heading * 360.0f/sm::mathconst<float>::two_pi << std::endl;
+            } else {
+                // Head along the vector sum of the goal direction and CAD. cad is a unit vector
+                // expressed relative to the agent's CURRENT heading (per compute_cad's azimuth
+                // convention: element 0 is cos, element 1 is sin of that relative angle), so the
+                // goal direction must be converted to the same relative, unit-vector form before
+                // summing -- world-frame goal_pos - cam_pos is a different reference frame
+                // (world, not agent-relative) and a different scale (arena distance, not unit
+                // length), so it can't be combined with cad directly.
+                //
+                // compute_comanv/compute_cad's azimuth convention increases towards the agent's
+                // RIGHT (it's built directly from increasing eye-image column index), whereas
+                // rotateCamerasLocallyAround (and this function's world-frame atan2(x,z) heading
+                // maths, verified against it above in the goal-seeking branch) takes a positive
+                // angle to mean turning LEFT -- the opposite handedness. Mirror cad into that
+                // convention (negate its sin/y component, i.e. negate its azimuth) before using
+                // it as a heading contribution, otherwise the agent turns towards the obstacle
+                // CAD is meant to steer it away from.
+                const sm::vec<float, 2> cad_rotation_frame = { cad[0], -cad[1] };
+
+                desired_heading_rad = std::atan2 (goal_pos[0] - cam_pos[0], goal_pos[2] - cam_pos[2]);
+                const float goal_relative_heading_rad = desired_heading_rad - current_heading_rad;
+                const sm::vec<float, 2> goal_dir = { std::cos (goal_relative_heading_rad), std::sin (goal_relative_heading_rad) };
+                const sm::vec<float, 2> combined_dir = goal_dir + cad_rotation_frame;
+                delta_heading = std::atan2 (combined_dir[1], combined_dir[0]);
+
+                std::cout << "Avoiding obstacle!!!!" << std::endl;
+                std::cout << "can_mag (" << comanv_magnitude << ") GREATER THAN threshold. (" << can_threshold << ")" << std::endl;
+                std::cout << "desired heading (deg) : " <<  desired_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
+                std::cout << "current heading (deg) : " <<  current_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
+                std::cout << "goal_relative_heading (deg) : " <<  goal_relative_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
+                std::cout << "goal_dir : " <<  goal_dir << std::endl;
+                std::cout << "collision avoidance dir (plot/column convention) : " <<  cad << std::endl;
+                std::cout << "collision avoidance dir (rotation convention) : " <<  cad_rotation_frame << std::endl;
+                std::cout << "combined_dir : " << combined_dir  << std::endl;
+                std::cout << "delta_heading (degrees in camera frame) : " << delta_heading * 360.0f/sm::mathconst<float>::two_pi << std::endl;
+            }
+            while (delta_heading > mc::pi)   { delta_heading -= mc::two_pi; }
+            while (delta_heading <= -mc::pi) { delta_heading += mc::two_pi; }
+
+            rotateCamerasLocallyAround (delta_heading, 0.0f, 1.0f, 0.0f);
+            // Same fixed per-step distance as a single WASD tap (kcmd_step_distance()), so an
+            // avoid-mode step and a key-mode step move the agent by the same amount. The
+            // rotation above is applied instantly, so the first several sub-moves of the press
+            // that follows will still carry rotation-induced optic flow -- client code should
+            // only accumulate a flow-derived metric like comanv_magnitude over the later
+            // sub-moves of the press (see submoves_remaining_in_press()), once that's settled.
+            this->enqueue_jittered_submoves_dir (sm::vec<float>::uz(), this->kcmd_step_distance());
+        }
+
         bool csv_playback()
         {
             bool rtn = true;
@@ -1468,10 +1552,13 @@ export namespace craysim
                 const std::size_t press_index = this->pending_press_indices.front();
                 this->submovement_xz_by_press[press_index].push_back (xz);
                 --this->pending_press_remaining.front();
+                this->submoves_remaining_after_last_applied = this->pending_press_remaining.front();
                 if (this->pending_press_remaining.front() == 0u) {
                     this->completed_presses.push_back (true);
+                    this->completed_press_step_distances.push_back (this->pending_press_full_steps.front());
                     this->pending_press_remaining.pop_front();
                     this->pending_press_indices.pop_front();
+                    this->pending_press_full_steps.pop_front();
                 }
             }
         }
@@ -1484,10 +1571,22 @@ export namespace craysim
             return true;
         }
 
-        bool pop_completed_press()
+        // How many sub-moves are still queued for the current press, as of the sub-move most
+        // recently applied by finish_submovement_for_frame() (0 once/if that sub-move completed
+        // the press). Lets client code identify, e.g., "the last N sub-moves of this press" --
+        // for suppressing rotation-induced optic flow at the start of an avoid-mode press from a
+        // flow-derived metric, without needing a separate settle period.
+        std::size_t submoves_remaining_in_press() const { return this->submoves_remaining_after_last_applied; }
+
+        // Pops the next completed press, if any, also returning the total forward distance
+        // (scene units) that press moved -- the full_step passed to enqueue_jittered_submoves_dir
+        // -- so client code can normalize flow-derived metrics like comanv_magnitude by it.
+        bool pop_completed_press (float& out_step_distance)
         {
             if (this->completed_presses.empty()) { return false; }
             this->completed_presses.pop_front();
+            out_step_distance = this->completed_press_step_distances.front();
+            this->completed_press_step_distances.pop_front();
             return true;
         }
 
@@ -1501,8 +1600,10 @@ export namespace craysim
             this->submovement_xz_by_press.clear();
             this->new_xz_points.clear();
             this->completed_presses.clear();
+            this->completed_press_step_distances.clear();
             this->pending_press_indices.clear();
             this->pending_press_remaining.clear();
+            this->pending_press_full_steps.clear();
         }
 
         /*
@@ -1666,11 +1767,22 @@ export namespace craysim
         };
         sm::flags<move_sense> move_state;
 
-        // Speed of translations commanded by key press (in scene units per second). From this
-        // determine distance for one movement step based on current FPS/seconds per frame
+        // Speed of translations commanded by key press (in scene units per second). Combined
+        // with frame_tau (below) in kcmd_step_distance() to give the fixed per-press distance
+        // for both a single WASD tap and an avoid-mode movement step.
         float kcmd_speed = 0.5f;
         // Speed of rotations
         float kcmd_angular_speed = 2.0f * mc::two_pi / 360.0f;
+
+        // Fixed per-press step distance (scene units) for a single WASD tap or avoid-mode
+        // decision. Deliberately independent of the live fps_profiler reading -- both modes
+        // apply exactly one step per discrete event (a keypress, or a movement decision), not
+        // a continuously-held key, so fps-compensating it would just make the step size drift
+        // with actual render performance rather than reflecting a real held-key duration.
+        float kcmd_step_distance() const
+        {
+            return this->kcmd_speed * static_cast<float> (this->frame_tau);
+        }
 
         // The instantaneous velocity arising from the last movement
         sm::vec<float> instantaneous_velocity = {};
@@ -1710,6 +1822,10 @@ export namespace craysim
         int microsaccadic_n_submoves = 8;
         float microsaccadic_heading_sigma_deg = 18.0f;
 
+        // Threshold on comanv_magnitude used by towards_goal_avoiding_collisions() to decide
+        // between heading for the goal and turning to avoid a collision.
+        float can_threshold = 1.0f;
+
     private:
         bool is_translation_key (const int key) const
         {
@@ -1721,8 +1837,6 @@ export namespace craysim
 
         void enqueue_jittered_submoves (const int key)
         {
-            if (!this->microsaccadic_motion_enabled || this->microsaccadic_n_submoves <= 0) { return; }
-
             sm::vec<float> step_dir = {};
             if (key == mplot::key::w) {
                 step_dir = sm::vec<float>::uz();
@@ -1733,14 +1847,20 @@ export namespace craysim
             } else if (key == mplot::key::d) {
                 step_dir = -sm::vec<float>::ux();
             }
+            this->enqueue_jittered_submoves_dir (step_dir, this->kcmd_step_distance());
+        }
+
+        // Common body of enqueue_jittered_submoves, factored out so towards_goal_avoiding_collisions()
+        // can queue a forward step the same way a WASD keypress does, without going through key codes.
+        // full_step is the total forward distance for this movement (scene units), split evenly
+        // (before jitter) across microsaccadic_n_submoves sub-moves.
+        void enqueue_jittered_submoves_dir (const sm::vec<float>& step_dir, const float full_step)
+        {
+            if (!this->microsaccadic_motion_enabled || this->microsaccadic_n_submoves <= 0) { return; }
 
             sm::vec<float> lateral_dir = this->scene_up.cross (step_dir);
             if (lateral_dir.length() > 0.0f) { lateral_dir.renormalize(); }
 
-            float fps = this->fps_profiler.fps_mean;
-            if (fps < 1.0f) { fps = 60.0f; }
-
-            const float full_step = this->kcmd_speed / fps;
             const float substep_forward = full_step / static_cast<float> (this->microsaccadic_n_submoves);
             const float sigma_rad = this->microsaccadic_heading_sigma_deg * sm::mathconst<float>::deg2rad;
             std::normal_distribution<float> heading_error_rad (0.0f, sigma_rad);
@@ -1749,6 +1869,7 @@ export namespace craysim
             this->submovement_xz_by_press.emplace_back();
             this->pending_press_indices.push_back (press_index);
             this->pending_press_remaining.push_back (static_cast<std::size_t> (this->microsaccadic_n_submoves));
+            this->pending_press_full_steps.push_back (full_step);
 
             for (int i = 0; i < this->microsaccadic_n_submoves; ++i) {
                 const float dtheta = heading_error_rad (this->microsaccadic_rng);
@@ -1781,9 +1902,12 @@ export namespace craysim
         std::deque<sm::vec<float>> pending_submoves;
         std::deque<sm::vec<float, 2>> new_xz_points;
         std::deque<bool> completed_presses;
+        std::deque<float> completed_press_step_distances;
         std::vector<std::vector<sm::vec<float, 2>>> submovement_xz_by_press;
         std::deque<std::size_t> pending_press_indices;
         std::deque<std::size_t> pending_press_remaining;
+        std::deque<float> pending_press_full_steps;
+        std::size_t submoves_remaining_after_last_applied = 0;
         bool applied_submove_this_frame = false;
         bool microsaccadic_owns_api_move = false;
 
