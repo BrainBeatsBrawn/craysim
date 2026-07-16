@@ -1106,17 +1106,17 @@ export namespace craysim
             const sm::vec<float> cam_pos = cam_to_scene.translation();
             const sm::vec<float> fwd = cam_to_scene.col(2).less_one_dim();
             const float current_heading_rad = std::atan2 (fwd[0], fwd[2]);
-            std::cout << " = = = = = Deciding whether to got to goal or avoid and obstacle = = = = = " << std::endl;
-            if (comanv_magnitude <= this->can_threshold) {
-                // Desired heading is just the location of the goal w.r.t to the current agent position
-                desired_heading_rad = std::atan2 (goal_pos[0] - cam_pos[0], goal_pos[2] - cam_pos[2]);
-                delta_heading = desired_heading_rad - current_heading_rad;
+            // std::cout << " = = = = = Deciding whether to got to goal or avoid and obstacle = = = = = " << std::endl;
+            // if (comanv_magnitude <= this->can_threshold) {
+            //     // Desired heading is just the location of the goal w.r.t to the current agent position
+            //     desired_heading_rad = std::atan2 (goal_pos[0] - cam_pos[0], goal_pos[2] - cam_pos[2]);
+            //     delta_heading = desired_heading_rad - current_heading_rad;
 
-                std::cout << "Heading to Goal!!!!" << std::endl;
-                std::cout << "can_mag (" << comanv_magnitude << ") < threshold. (" << can_threshold << ")" << std::endl;
-                std::cout << "Desired heading (degrees in world frame) : " << desired_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
-                std::cout << "delta_heading (degrees in camera frame) : " << delta_heading * 360.0f/sm::mathconst<float>::two_pi << std::endl;
-            } else {
+            //     std::cout << "Heading to Goal!!!!" << std::endl;
+            //     std::cout << "can_mag (" << comanv_magnitude << ") < threshold. (" << can_threshold << ")" << std::endl;
+            //     std::cout << "Desired heading (degrees in world frame) : " << desired_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
+            //     std::cout << "delta_heading (degrees in camera frame) : " << delta_heading * 360.0f/sm::mathconst<float>::two_pi << std::endl;
+            // } else {
                 // Head along the vector sum of the goal direction and CAD, both expressed as
                 // (x, z) unit vectors in the agent-local horizontal plane -- same convention as
                 // fwd/current_heading_rad/desired_heading_rad above: z is the rotation's reference
@@ -1137,21 +1137,14 @@ export namespace craysim
                 desired_heading_rad = std::atan2 (goal_pos[0] - cam_pos[0], goal_pos[2] - cam_pos[2]);
                 const float goal_relative_heading_rad = desired_heading_rad - current_heading_rad;
                 const sm::vec<float, 2> goal_dir = { std::sin (goal_relative_heading_rad), std::cos (goal_relative_heading_rad) };
-
-                // Blend goal_dir and cad_rotation_frame by a fixed weighted average -- bypassing
-                // comanv_sigmoid() for now (left defined above, unused here; see the commented-out
-                // block below for how to reinstate the comanv_magnitude-dependent blend).
-                constexpr float cad_weight = 0.5f;
-                constexpr float goal_weight = 0.5f;
-                // const float sigmoid_out = this->comanv_sigmoid (comanv_magnitude);
-                // const float cad_weight = (sigmoid_out + 1.0f) * 0.5f;
-                // const float goal_weight = 1.0f - cad_weight;
+   
+                const float cad_weight = this->comanv_sigmoid (comanv_magnitude);
+                const float goal_weight = 1.0f - cad_weight;
                 const sm::vec<float, 2> combined_dir = (goal_weight * goal_dir) + (cad_weight * cad_rotation_frame);
                 // Decode as (x, z), matching the encoding above -- atan2(x, z), same as
                 // current_heading_rad/desired_heading_rad -- not atan2(z, x).
                 delta_heading = std::atan2 (combined_dir[0], combined_dir[1]);
 
-                std::cout << "Avoiding obstacle!!!!" << std::endl;
                 std::cout << "can_mag (" << comanv_magnitude << ") GREATER THAN threshold. (" << can_threshold << ")" << std::endl;
                 std::cout << "cad_weight : " << cad_weight << ", goal_weight : " << goal_weight << std::endl;
                 std::cout << "fwd vector : " << fwd[0] << ", " << fwd[2] << std::endl; 
@@ -1163,7 +1156,7 @@ export namespace craysim
                 std::cout << "collision avoidance dir (rotation convention) : " <<  cad_rotation_frame << std::endl;
                 std::cout << "combined_dir : " << combined_dir  << std::endl;
                 std::cout << "delta_heading (degrees in camera frame) : " << delta_heading * 360.0f/sm::mathconst<float>::two_pi << std::endl;
-            }
+            // }
             while (delta_heading > mc::pi)   { delta_heading -= mc::two_pi; }
             while (delta_heading <= -mc::pi) { delta_heading += mc::two_pi; }
 
@@ -1839,22 +1832,25 @@ export namespace craysim
         float can_threshold = 1.0f;
 
         // Steepness of comanv_sigmoid() below -- larger values make the goal/CAD blend switch
-        // more abruptly around comanv_sigmoid_origin; smaller values make the transition more
+        // more abruptly around comanv_sigmoid_gain; smaller values make the transition more
         // gradual. Exposed so it can be tuned at runtime.
-        float comanv_sigmoid_slope = 1.0f;
+        float comanv_sigmoid_slope = 4.0f;
 
         // comanv_magnitude at which comanv_sigmoid() below is centred (returns 0 there). Exposed
         // so it can be tuned at runtime.
-        float comanv_sigmoid_origin = 0.2f;
+        float comanv_sigmoid_gain = 2.0f;
 
-        // Maps comanv_magnitude onto [-1, 1], symmetric (odd) about comanv_sigmoid_origin: 0 at
-        // comanv_magnitude == comanv_sigmoid_origin, tending to +1 as comanv_magnitude grows well
+        // Maps comanv_magnitude onto [-1, 1], symmetric (odd) about comanv_sigmoid_gain: 0 at
+        // comanv_magnitude == comanv_sigmoid_gain, tending to +1 as comanv_magnitude grows well
         // above that and to -1 as it falls well below. Used by towards_goal_avoiding_collisions()
         // to blend the goal heading and CAD -- see its use there for how the return value maps to
         // a blend weight.
         float comanv_sigmoid (const float comanv_magnitude) const
         {
-            return std::tanh (this->comanv_sigmoid_slope * (comanv_magnitude - this->comanv_sigmoid_origin));
+            // float out = std::tanh (this->comanv_sigmoid_slope * (comanv_magnitude - this->comanv_sigmoid_gain));
+            float out = 1.0f / (1.0f + std::pow (comanv_magnitude / this->comanv_sigmoid_gain, -this->comanv_sigmoid_slope));
+            // out = out < this->can_threshold ? -1.0f : out;
+            return out;
         }
 
     private:
