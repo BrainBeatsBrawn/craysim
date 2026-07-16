@@ -935,6 +935,7 @@ export namespace craysim
                 cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
                 // Now we have moved, can compute instantaneous velocity
                 this->instantaneous_velocity = cam_to_scene.translation() - cam_to_scene_sv.translation();
+                this->distance_moved += this->instantaneous_velocity.length();
 
                 this->tm1_ti0 = ti0_sv;
                 this->tm1_mv_camframe = mv_camframe;
@@ -1115,6 +1116,7 @@ export namespace craysim
                     cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
                     // Now we have moved, can compute instantaneous velocity
                     this->instantaneous_velocity = cam_to_scene.translation() - cam_to_scene_sv.translation();
+                    this->distance_moved += this->instantaneous_velocity.length();
 
                     this->tm1_ti0 = ti0_sv;
                     this->tm1_mv_camframe = mv_camframe;
@@ -1192,6 +1194,7 @@ export namespace craysim
             sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
             cam_to_scene.translate (mv_camframe);
             this->instantaneous_velocity = cam_to_scene.translation() - cam_to_scene_sv.translation();
+            this->distance_moved += this->instantaneous_velocity.length();
             if (this->sim_opts.test (craysim::options::breadcrumbs_walk)) {
                 ++this->move_counter;
                 this->add_breadcrumb (cam_to_scene_sv.translation());
@@ -1224,6 +1227,7 @@ export namespace craysim
                 cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
                 // Now we have moved, can compute instantaneous velocity
                 this->instantaneous_velocity = cam_to_scene.translation() - cam_to_scene_sv.translation();
+                this->distance_moved += this->instantaneous_velocity.length();
 
                 this->tm1_ti0 = ti0_sv;
                 this->tm1_mv_camframe = mv_camframe;
@@ -1350,10 +1354,6 @@ export namespace craysim
                             this->set_camera_pose (cam_to_scene);
                         } else { std::cout << "csv_playback: cam_to_scene is identity?!\n"; }
                         // else what to do if cam_to_scene is identity?
-
-                        // Now we have moved, can compute instantaneous velocity
-                        //this->instantaneous_velocity = cam_to_scene.translation() - lastcamloc;
-                        //this->distance_moved += this->instantaneous_velocity.length();
 
                     } else {
                         // Rather than throwing, could just move on to next in csv?
@@ -1631,6 +1631,7 @@ export namespace craysim
 
         // Get the transform matrix defining the pose of the camera/agent. That's stored in agent_coords
         sm::mat<float, 4> get_camera_pose() const { return this->agent_coords->getViewMatrix(); }
+        sm::vec<float, 3> get_camera_position() const { return this->agent_coords->getViewMatrix().translation(); }
 
         /*
          * Is the home location to the left of the agent/camera?
@@ -2015,6 +2016,7 @@ export namespace craysim
                 } else if (key == mplot::key::o) {
                     std::cout << "Flip homing\n";
                     this->sim_opts.flip (craysim::options::homing_mode);
+                    this->distance_moved = 0.0f;
                 } else if (key == mplot::key::escape) {
                     this->stop();
 
