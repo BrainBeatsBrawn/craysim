@@ -632,6 +632,20 @@ export namespace craysim
             this->move_counter = 1;
         }
 
+        void hide_landscape (const std::string also_hide = "")
+        {
+            if (this->land != nullptr) { this->land->setHide (true); }
+            this->init_vm_accessor(); // Using an accessor scheme to loop through all VMs in a scene
+            if (!also_hide.empty()) {
+                mplot::VisualModel<glver>* vmp = nullptr;
+                while ((vmp = this->get_next_vm_accessor()) != nullptr) {
+                    if (vmp->name == also_hide) {
+                        vmp->setHide (true);
+                    }
+                }
+            }
+        }
+
         void setup_landscape()
         {
             if (this->land == nullptr) { return; } // should have called find_landscape() first
