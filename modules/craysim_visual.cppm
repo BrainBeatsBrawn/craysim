@@ -1023,7 +1023,30 @@ export namespace craysim
             }
         }
 
-        // Set camera pose for all cameras
+        // Set camera pose for all cameras. First find the triangle situated below the pose specified by cam_to_scene
+        void set_camera_pose_and_ti0 (const sm::mat<float, 4>& cam_to_scene)
+        {
+            if (this->land == nullptr) {
+                std::cout << "Cannot set ti0; there's no land model\n";
+                return;
+            }
+            if (this->land->navmesh == nullptr) {
+                std::cout << "Cannot set ti0; land has no navmesh\n";
+                return;
+            }
+            // Find triangle hits using the scene's 'up' direction.
+            sm::vec<float> camloc_mf = (this->land_to_scene.inverse() * cam_to_scene).translation();
+            sm::vec<float> vnrm = this->scene_up;
+            vnrm *= 4.0f;
+            auto[hp_scene, _ti0] = this->land->navmesh->find_triangle_hit (this->land_to_scene, camloc_mf + (vnrm / 2.0f), -2.0f * vnrm, this->last_ti);
+            if (_ti0 != std::numeric_limits<std::uint32_t>::max()) {
+                this->set_camera_pose (cam_to_scene);
+            } else {
+                std::cout << "Not setting camera pose, as no triangle hit was found for the pose\n" << cam_to_scene << std::endl;
+            }
+        }
+
+        // Set camera pose for all cameras. This expects that ti0 is correctly set for the hit point of cam_to_scene through the landscape.
         void set_camera_pose (const sm::mat<float, 4>& cam_to_scene)
         {
             std::uint32_t camidx = scene->getCameraIndex();
