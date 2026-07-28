@@ -44,6 +44,7 @@ export import mplot.fps.profiler;
 export import oces.reader;
 
 import sm.random_walk;
+import ringattractor;
 
 // Reproduce controller functions for the mplot window for ease of use
 export namespace craysim
@@ -1083,29 +1084,161 @@ export namespace craysim
 
         // "towards_goal_avoiding_collisions" mode. Call once per step decision: at start-up, and
         // again each time client code sees a completed press (v.pop_completed_press()) together
-        // with that press's comanv_magnitude/cad (computed elsewhere, e.g. engelhaaf::plotting,
-        // from that step's optic flow -- this module has no notion of optic flow itself, hence
-        // they're parameters here rather than members).
+        // with that press's comanv_magnitude/nearness_heading_frame (computed elsewhere, e.g.
+        // engelhaaf::plotting, from that step's optic flow -- this module has no notion of optic
+        // flow itself, hence they're parameters here rather than members).
         //
-        // comanv_magnitude <= can_threshold: rotate to face goal_pos (world x,z) and step forward.
-        // comanv_magnitude >  can_threshold: rotate to face cad -- expressed as a heading offset
-        //   relative to the agent's CURRENT heading, per engelhaaf::plotting::compute_cad's
-        //   azimuth convention -- and step forward.
+        // Combines a goal-direction vector and a nearness-derived safety vector (both built on
+        // heading_ra's N=180 ring) via RingAttractor::goal_direction_to_vector/
+        // nearness_to_safety_vector, weighted by 1 - safety_at_goal (the goal-weighted average
+        // of safety_vec -- see the comment at its computation below for why this replaced an
+        // earlier comanv_magnitude/comanv_sigmoid-based global weight), then decodes the settled
+        // bump as the new heading -- see opteran/ringattractor's combine_goal_and_safety.cpp,
+        // where the general combine-then-decode scheme was checked against real captured
+        // nearness data before being wired in here. nearness_heading_frame must already be in
+        // "element 0 = straight ahead, increasing
+        // index = towards the agent's left" convention (see
+        // engelhaaf::plotting::nearness_colavg_to_heading_frame) -- the same convention
+        // goal_relative_heading_rad below is computed in; pass an empty vector (e.g. at start-up,
+        // before any flow data exists) to fall back to pure goal-seeking.
         //
         // Requires enable_microsaccadic_motion(true): steps are queued via the same
         // jittered-submove mechanism WASD keypresses use.
+        //
+        // The six out_* params (all nullptr by default, so callers that don't care pay
+        // nothing extra) expose the nearness/goal/safety/combined/output vectors and the
+        // decoded heading for live plotting -- see engelhaaf::plotting::update_heading_plots()
+        // and its own call site in main.cpp. out_nearness is nearness_heading_frame after
+        // resample_to_ring() (i.e. on the SAME N-length ring grid, and the SAME "0 = straight
+        // ahead, positive = left" azimuth convention, as out_goal/out_safety/out_combined/
+        // out_output) -- plot it against out_azimuth_deg, not against the pre-existing
+        // "nearness column average" panel's own x-axis (engelhaaf::plotting::column_azimuth_deg),
+        // which is in the raw, oppositely-handed column convention (see
+        // engelhaaf::plotting::nearness_colavg_to_heading_frame's comment) and will look
+        // mismatched against these if compared directly.
         void towards_goal_avoiding_collisions (
             const sm::vec<float>& goal_pos,
             const float comanv_magnitude,
-            const sm::vec<float, 2>& cad)
+            const std::vector<float>& nearness_heading_frame,
+            std::vector<float>* out_azimuth_deg = nullptr,
+            std::vector<float>* out_nearness = nullptr,
+            std::vector<float>* out_goal = nullptr,
+            std::vector<float>* out_safety = nullptr,
+            std::vector<float>* out_combined = nullptr,
+            std::vector<float>* out_output = nullptr,
+            float* out_heading_deg = nullptr)
         {
             const sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
 
-            float delta_heading = 0.0f;
-            float desired_heading_rad = 0.0f;
             const sm::vec<float> cam_pos = cam_to_scene.translation();
             const sm::vec<float> fwd = cam_to_scene.col(2).less_one_dim();
             const float current_heading_rad = std::atan2 (fwd[0], fwd[2]);
+
+            // Desired heading is the location of the goal w.r.t the current agent position;
+            // goal_relative_heading_rad (0 = straight ahead, positive = LEFT turn, matching
+            // atan2(x, z)'s handedness -- same convention rotateCamerasLocallyAround expects)
+            // is what both goal_direction_to_vector() and nearness_heading_frame are expressed
+            // in below.
+            const float desired_heading_rad = std::atan2 (goal_pos[0] - cam_pos[0], goal_pos[2] - cam_pos[2]);
+            const float goal_relative_heading_rad = desired_heading_rad - current_heading_rad;
+
+            const sm::vvec<double>& phi = this->heading_ra.positions();
+            const sm::vvec<double> goal_vec =
+                RingAttractor::goal_direction_to_vector (phi, static_cast<double>(goal_relative_heading_rad));
+
+            sm::vvec<double> nearness_ring (phi.size(), 0.0);
+            sm::vvec<double> safety_vec (phi.size(), 0.0);
+            double safety_weight = 0.0;
+            sm::vvec<double> combined = goal_vec;
+            if (!nearness_heading_frame.empty()) {
+                sm::vvec<double> nearness_dv (nearness_heading_frame.size(), 0.0);
+                for (std::size_t i = 0; i < nearness_heading_frame.size(); ++i) {
+                    nearness_dv[i] = static_cast<double>(nearness_heading_frame[i]);
+                }
+                nearness_ring = RingAttractor::resample_to_ring (nearness_dv);
+                safety_vec = RingAttractor::nearness_to_safety_vector (nearness_ring);
+
+                // Weight by how safe it specifically is to go where the goal points, not by
+                // comanv_magnitude (a scene-wide vector-sum, no notion of direction) -- that
+                // global scalar can stay moderate even with a real obstacle directly ahead
+                // if the rest of the visual field is relatively open, so no single global
+                // gain/slope threshold can simultaneously ignore off-axis clutter AND react
+                // decisively to a collision specifically in the goal's own direction (this
+                // was tried -- see comanv_sigmoid_gain/slope's own comments for the
+                // recalibration history -- and failed both ways: too low a gain made goal
+                // invisible against ordinary background clutter; too high a gain let the
+                // goal drive straight through an obstacle that was directly ahead, because
+                // aggregate comanv_magnitude never got large enough to react in time).
+                //
+                // safety_at_goal: the MINIMUM of safety_vec within a window around
+                // goal_relative_heading_rad, NOT a goal-weighted mean/average (tried first,
+                // see below for why that failed).
+                //
+                // A goal-weighted MEAN over goal_vec's own Gaussian spread was tried first
+                // and, combined with sharpening nearness_to_safety_vector's own contrast
+                // (see its comment), made things WORSE, not better -- confirmed directly
+                // (engelhaaf-flow real-run logs): sharpening the raw conversion concentrates
+                // low safety into a NARROWER column range around the true obstacle peak
+                // (that's what "sharper contrast" means), so averaging across goal_vec's
+                // wider ~10deg-SD window then captures LESS of that narrow dip, not more --
+                // e.g. one logged case had a real safety_vec minimum of 0.221 (an obstacle
+                // genuinely 7.9deg off the goal), but the goal-weighted MEAN across that same
+                // window came out to 0.834, because most of the window sat on the sigmoid's
+                // near-1 plateau either side of the narrow dip. A sharper raw conversion and
+                // a window MEAN are fighting each other by construction. Taking the MIN
+                // within the window instead directly answers "is there anything dangerous
+                // anywhere in the region I'm about to head into", independent of how narrow
+                // that danger is -- the two fixes then reinforce rather than fight.
+                //
+                // window_deg matches goal_direction_to_vector's own sigma_deg (10deg) -- the
+                // same angular region the goal vector itself treats as "the direction I'm
+                // heading", not an arbitrary separate choice.
+                constexpr double window_deg = 10.0;
+                constexpr double two_pi_d = 2.0 * sm::mathconst<double>::pi;
+                const double window_rad = window_deg * sm::mathconst<double>::pi / 180.0;
+                double safety_at_goal = 1.0;
+                for (unsigned int i = 0; i < safety_vec.size(); ++i) {
+                    double d = phi[i] - static_cast<double>(goal_relative_heading_rad);
+                    while (d > sm::mathconst<double>::pi)  { d -= two_pi_d; }
+                    while (d <= -sm::mathconst<double>::pi) { d += two_pi_d; }
+                    if (std::fabs (d) <= window_rad && safety_vec[i] < safety_at_goal) { safety_at_goal = safety_vec[i]; }
+                }
+
+                // A plain safety_weight = 1 - safety_at_goal (tried first) is directionally
+                // right but too gradual for "goal dominant until a collision is imminent,
+                // then switch": since safety_at_goal rarely reaches all the way down to 0
+                // (see above), a linear mapping caps out well short of fully overriding the
+                // goal even when directly facing something real -- logged real runs on
+                // data/engelhaaf_2015_very_cluttered.gltf never saw safety_at_goal drop
+                // below ~0.60 (i.e. linear weight never exceeded ~0.40), which earlier
+                // testing (opteran/ringattractor's combine_goal_and_safety.cpp) showed is
+                // not enough to move the settled heading off the goal's own peak. A
+                // logistic in safety_at_goal itself (not comanv_magnitude -- still local/
+                // direction-aware, just sharpened) fixes this: weight=0.5 exactly at
+                // safety_at_goal_threshold, saturating towards 1 as safety_at_goal falls
+                // below it and towards 0 as it rises above -- e.g. at threshold=0.6/
+                // slope=10, safety_at_goal=0.84 (typical open-path value logged above)
+                // gives weight=0.083 (more decisively goal-dominant than the linear
+                // mapping's 0.16), while the worst value actually logged (0.60) gives
+                // weight=0.5 (a real, decisive shift) instead of the linear mapping's 0.40.
+                safety_weight = 1.0 / (1.0 + std::exp (this->safety_at_goal_slope
+                                                        * (safety_at_goal - this->safety_at_goal_threshold)));
+                combined = (goal_vec * (1.0 - safety_weight)) + (safety_vec * safety_weight);
+            }
+
+            const double heading_rad = this->heading_ra.find_heading (combined * this->heading_ra_combined_gain);
+            float delta_heading = static_cast<float>(heading_rad);
+
+            std::cout << "comanv_magnitude : " << comanv_magnitude << ", safety_weight : " << safety_weight << std::endl;
+            std::cout << "fwd vector : " << fwd[0] << ", " << fwd[2] << std::endl;
+            std::cout << "desired heading (deg) : " <<  desired_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
+            std::cout << "current heading (deg) : " <<  current_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
+            std::cout << "goal_relative_heading (deg) : " <<  goal_relative_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
+            std::cout << "delta_heading (degrees in camera frame) : " << delta_heading * 360.0f/sm::mathconst<float>::two_pi << std::endl;
+
+            // --- Previous mechanism (vector-sum of goal_dir and CAD), kept for reference -----
+            // float delta_heading = 0.0f;
+            // float desired_heading_rad = 0.0f;
             // std::cout << " = = = = = Deciding whether to got to goal or avoid and obstacle = = = = = " << std::endl;
             // if (comanv_magnitude <= this->can_threshold) {
             //     // Desired heading is just the location of the goal w.r.t to the current agent position
@@ -1132,33 +1265,56 @@ export namespace craysim
                 // to the above. Converting it to this function's (x, z) convention means negating
                 // for the handedness flip (right- to left-handed) *and* swapping which element is
                 // x and which is z (cos/sin to sin/cos): x = -cad[1], z = cad[0].
-                const sm::vec<float, 2> cad_rotation_frame = { -cad[1], cad[0] };
+                // const sm::vec<float, 2> cad_rotation_frame = { -cad[1], cad[0] };
 
-                desired_heading_rad = std::atan2 (goal_pos[0] - cam_pos[0], goal_pos[2] - cam_pos[2]);
-                const float goal_relative_heading_rad = desired_heading_rad - current_heading_rad;
-                const sm::vec<float, 2> goal_dir = { std::sin (goal_relative_heading_rad), std::cos (goal_relative_heading_rad) };
-   
-                const float cad_weight = this->comanv_sigmoid (comanv_magnitude);
-                const float goal_weight = 1.0f - cad_weight;
-                const sm::vec<float, 2> combined_dir = (goal_weight * goal_dir) + (cad_weight * cad_rotation_frame);
+                // desired_heading_rad = std::atan2 (goal_pos[0] - cam_pos[0], goal_pos[2] - cam_pos[2]);
+                // const float goal_relative_heading_rad = desired_heading_rad - current_heading_rad;
+                // const sm::vec<float, 2> goal_dir = { std::sin (goal_relative_heading_rad), std::cos (goal_relative_heading_rad) };
+
+                // const float cad_weight = this->comanv_sigmoid (comanv_magnitude);
+                // const float goal_weight = 1.0f - cad_weight;
+                // const sm::vec<float, 2> combined_dir = (goal_weight * goal_dir) + (cad_weight * cad_rotation_frame);
                 // Decode as (x, z), matching the encoding above -- atan2(x, z), same as
                 // current_heading_rad/desired_heading_rad -- not atan2(z, x).
-                delta_heading = std::atan2 (combined_dir[0], combined_dir[1]);
-
-                std::cout << "can_mag (" << comanv_magnitude << ") GREATER THAN threshold. (" << can_threshold << ")" << std::endl;
-                std::cout << "cad_weight : " << cad_weight << ", goal_weight : " << goal_weight << std::endl;
-                std::cout << "fwd vector : " << fwd[0] << ", " << fwd[2] << std::endl; 
-                std::cout << "desired heading (deg) : " <<  desired_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
-                std::cout << "current heading (deg) : " <<  current_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
-                std::cout << "goal_relative_heading (deg) : " <<  goal_relative_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
-                std::cout << "goal_dir : " <<  goal_dir << std::endl;
-                std::cout << "collision avoidance dir (plot/column convention) : " <<  cad << std::endl;
-                std::cout << "collision avoidance dir (rotation convention) : " <<  cad_rotation_frame << std::endl;
-                std::cout << "combined_dir : " << combined_dir  << std::endl;
-                std::cout << "delta_heading (degrees in camera frame) : " << delta_heading * 360.0f/sm::mathconst<float>::two_pi << std::endl;
+                // delta_heading = std::atan2 (combined_dir[0], combined_dir[1]);
             // }
+            // --- end previous mechanism ------------------------------------------------------
+
             while (delta_heading > mc::pi)   { delta_heading -= mc::two_pi; }
             while (delta_heading <= -mc::pi) { delta_heading += mc::two_pi; }
+
+            if (out_azimuth_deg != nullptr) {
+                out_azimuth_deg->resize (phi.size());
+                for (std::size_t i = 0; i < phi.size(); ++i) {
+                    (*out_azimuth_deg)[i] = static_cast<float>(phi[i] * 180.0 / sm::mathconst<double>::pi);
+                }
+            }
+            if (out_nearness != nullptr) {
+                out_nearness->resize (nearness_ring.size());
+                for (std::size_t i = 0; i < nearness_ring.size(); ++i) { (*out_nearness)[i] = static_cast<float>(nearness_ring[i]); }
+            }
+            if (out_goal != nullptr) {
+                out_goal->resize (goal_vec.size());
+                for (std::size_t i = 0; i < goal_vec.size(); ++i) { (*out_goal)[i] = static_cast<float>(goal_vec[i]); }
+            }
+            if (out_safety != nullptr) {
+                out_safety->resize (safety_vec.size());
+                for (std::size_t i = 0; i < safety_vec.size(); ++i) { (*out_safety)[i] = static_cast<float>(safety_vec[i]); }
+            }
+            if (out_combined != nullptr) {
+                out_combined->resize (combined.size());
+                for (std::size_t i = 0; i < combined.size(); ++i) { (*out_combined)[i] = static_cast<float>(combined[i]); }
+            }
+            if (out_output != nullptr) {
+                const sm::vvec<double> activity = this->heading_ra.activity();
+                out_output->resize (activity.size());
+                for (std::size_t i = 0; i < activity.size(); ++i) { (*out_output)[i] = static_cast<float>(activity[i]); }
+            }
+            if (out_heading_deg != nullptr) {
+                float hd = delta_heading * 360.0f / sm::mathconst<float>::two_pi;
+                if (hd < 0.0f) { hd += 360.0f; }
+                *out_heading_deg = hd;
+            }
 
             rotateCamerasLocallyAround (delta_heading, 0.0f, 1.0f, 0.0f);
             // Same fixed per-step distance as a single WASD tap (kcmd_step_distance()), so an
@@ -1827,24 +1983,25 @@ export namespace craysim
         int microsaccadic_n_submoves = 8;
         float microsaccadic_heading_sigma_deg = 18.0f;
 
-        // Threshold on comanv_magnitude used by towards_goal_avoiding_collisions() to decide
-        // between heading for the goal and turning to avoid a collision.
+        // NOTE: can_threshold/comanv_sigmoid_gain/comanv_sigmoid_slope/comanv_sigmoid()
+        // below are no longer used by towards_goal_avoiding_collisions()'s active mechanism
+        // -- it now weights the goal/safety blend by safety_at_goal (a direction-aware,
+        // self-calibrating local quantity computed inline there), not by a global
+        // comanv_magnitude scalar run through this sigmoid. Two successive global-scalar
+        // calibrations were tried and both failed in opposite ways: gain=2.0 saturated to
+        // ~total avoidance even in typical, barely-cluttered moments (goal's contribution
+        // became too small to see or act on); gain=10.5 (raised specifically to fix that)
+        // then left the goal dominant even with a real obstacle directly ahead, because
+        // comanv_magnitude -- a scene-wide vector-sum with no notion of direction -- can
+        // stay moderate with a close obstacle dead ahead if the rest of the visual field is
+        // relatively open. No single global threshold can answer "ignore off-axis clutter"
+        // and "react to a collision specifically ahead" at once. Left in place (not
+        // deleted) since the previous vector-sum mechanism below (commented out) still
+        // references them, and they may be a useful starting point if a future mechanism
+        // wants a global-scale term again.
         float can_threshold = 1.0f;
-
-        // Steepness of comanv_sigmoid() below -- larger values make the goal/CAD blend switch
-        // more abruptly around comanv_sigmoid_gain; smaller values make the transition more
-        // gradual. Exposed so it can be tuned at runtime.
-        float comanv_sigmoid_slope = 4.0f;
-
-        // comanv_magnitude at which comanv_sigmoid() below is centred (returns 0 there). Exposed
-        // so it can be tuned at runtime.
-        float comanv_sigmoid_gain = 2.0f;
-
-        // Maps comanv_magnitude onto [-1, 1], symmetric (odd) about comanv_sigmoid_gain: 0 at
-        // comanv_magnitude == comanv_sigmoid_gain, tending to +1 as comanv_magnitude grows well
-        // above that and to -1 as it falls well below. Used by towards_goal_avoiding_collisions()
-        // to blend the goal heading and CAD -- see its use there for how the return value maps to
-        // a blend weight.
+        float comanv_sigmoid_slope = 10.0f;
+        float comanv_sigmoid_gain = 10.5f;
         float comanv_sigmoid (const float comanv_magnitude) const
         {
             // float out = std::tanh (this->comanv_sigmoid_slope * (comanv_magnitude - this->comanv_sigmoid_gain));
@@ -1852,6 +2009,41 @@ export namespace craysim
             // out = out < this->can_threshold ? -1.0f : out;
             return out;
         }
+
+        // safety_at_goal value (see towards_goal_avoiding_collisions()'s own comment) at
+        // which the goal/safety blend is exactly 50/50; above it the goal dominates, below
+        // it safety dominates. Exposed so it can be tuned at runtime.
+        float safety_at_goal_threshold = 0.6f;
+
+        // Steepness of the safety_at_goal logistic -- larger values make the switch around
+        // safety_at_goal_threshold sharper (more like a hard threshold); smaller values
+        // make it more gradual. Exposed so it can be tuned at runtime.
+        float safety_at_goal_slope = 10.0f;
+
+        // Ring attractor heading estimator used by towards_goal_avoiding_collisions() to
+        // combine the goal direction and the nearness-derived safety field. Stateful (the
+        // activity profile persists between calls, as in a real continuous attractor), so
+        // it lives here rather than being constructed fresh inside that function -- see
+        // opteran/ringattractor's RingAttractor.cppm and README.md for the model itself.
+        //
+        // All positional params at the class defaults EXCEPT the last (steps_per_call):
+        // 3200 (= 160 calls * the default 20) matches the settle time
+        // combine_goal_and_safety.cpp/tests.cpp's own cue-pinning check use (16*tau at the
+        // default h=0.005) -- needed because, unlike that demo (which looped find_heading()
+        // 160 times per decision before reading the result), this is called only ONCE per
+        // press decision. Discovered empirically: with the default steps_per_call=20, the
+        // very first decision (from heading_ra's fresh near-random-noise initial state)
+        // decoded a nonsense ~173deg turn instead of tracking the goal it was actually
+        // given -- one 20-step call from a cold start is nowhere near enough to settle.
+        RingAttractor heading_ra{6.0, 0.2, 2.5, 0.6, 0.1, 0.1, 2.0, 0.15, 0.004, 0.1, 9.0, 1.0, 0.005, 3200};
+
+        // Overall drive amplitude applied to the combined goal+safety vector before
+        // find_heading() -- matches the amplitude opteran/ringattractor's own demos (and
+        // combine_goal_and_safety.cpp, where this mechanism was first checked against real
+        // nearness data) use, since RingAttractor's activation threshold is calibrated
+        // against inputs of roughly this scale, not the [0, 1] scale goal/safety vectors
+        // are built in.
+        double heading_ra_combined_gain = 3.0;
 
     private:
         bool is_translation_key (const int key) const
