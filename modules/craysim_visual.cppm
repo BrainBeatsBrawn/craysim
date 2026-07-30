@@ -1148,7 +1148,6 @@ export namespace craysim
 
             sm::vvec<double> nearness_ring (phi.size(), 0.0);
             sm::vvec<double> safety_vec (phi.size(), 0.0);
-            double safety_weight = 0.0;
             sm::vvec<double> combined = goal_vec;
             if (!nearness_heading_frame.empty()) {
                 sm::vvec<double> nearness_dv (nearness_heading_frame.size(), 0.0);
@@ -1158,78 +1157,15 @@ export namespace craysim
                 nearness_ring = RingAttractor::resample_to_ring (nearness_dv);
                 safety_vec = RingAttractor::nearness_to_safety_vector (nearness_ring);
 
-                // Weight by how safe it specifically is to go where the goal points, not by
-                // comanv_magnitude (a scene-wide vector-sum, no notion of direction) -- that
-                // global scalar can stay moderate even with a real obstacle directly ahead
-                // if the rest of the visual field is relatively open, so no single global
-                // gain/slope threshold can simultaneously ignore off-axis clutter AND react
-                // decisively to a collision specifically in the goal's own direction (this
-                // was tried -- see comanv_sigmoid_gain/slope's own comments for the
-                // recalibration history -- and failed both ways: too low a gain made goal
-                // invisible against ordinary background clutter; too high a gain let the
-                // goal drive straight through an obstacle that was directly ahead, because
-                // aggregate comanv_magnitude never got large enough to react in time).
-                //
-                // safety_at_goal: the MINIMUM of safety_vec within a window around
-                // goal_relative_heading_rad, NOT a goal-weighted mean/average (tried first,
-                // see below for why that failed).
-                //
-                // A goal-weighted MEAN over goal_vec's own Gaussian spread was tried first
-                // and, combined with sharpening nearness_to_safety_vector's own contrast
-                // (see its comment), made things WORSE, not better -- confirmed directly
-                // (engelhaaf-flow real-run logs): sharpening the raw conversion concentrates
-                // low safety into a NARROWER column range around the true obstacle peak
-                // (that's what "sharper contrast" means), so averaging across goal_vec's
-                // wider ~10deg-SD window then captures LESS of that narrow dip, not more --
-                // e.g. one logged case had a real safety_vec minimum of 0.221 (an obstacle
-                // genuinely 7.9deg off the goal), but the goal-weighted MEAN across that same
-                // window came out to 0.834, because most of the window sat on the sigmoid's
-                // near-1 plateau either side of the narrow dip. A sharper raw conversion and
-                // a window MEAN are fighting each other by construction. Taking the MIN
-                // within the window instead directly answers "is there anything dangerous
-                // anywhere in the region I'm about to head into", independent of how narrow
-                // that danger is -- the two fixes then reinforce rather than fight.
-                //
-                // window_deg matches goal_direction_to_vector's own sigma_deg (10deg) -- the
-                // same angular region the goal vector itself treats as "the direction I'm
-                // heading", not an arbitrary separate choice.
-                constexpr double window_deg = 10.0;
-                constexpr double two_pi_d = 2.0 * sm::mathconst<double>::pi;
-                const double window_rad = window_deg * sm::mathconst<double>::pi / 180.0;
-                double safety_at_goal = 1.0;
-                for (unsigned int i = 0; i < safety_vec.size(); ++i) {
-                    double d = phi[i] - static_cast<double>(goal_relative_heading_rad);
-                    while (d > sm::mathconst<double>::pi)  { d -= two_pi_d; }
-                    while (d <= -sm::mathconst<double>::pi) { d += two_pi_d; }
-                    if (std::fabs (d) <= window_rad && safety_vec[i] < safety_at_goal) { safety_at_goal = safety_vec[i]; }
-                }
-
-                // A plain safety_weight = 1 - safety_at_goal (tried first) is directionally
-                // right but too gradual for "goal dominant until a collision is imminent,
-                // then switch": since safety_at_goal rarely reaches all the way down to 0
-                // (see above), a linear mapping caps out well short of fully overriding the
-                // goal even when directly facing something real -- logged real runs on
-                // data/engelhaaf_2015_very_cluttered.gltf never saw safety_at_goal drop
-                // below ~0.60 (i.e. linear weight never exceeded ~0.40), which earlier
-                // testing (opteran/ringattractor's combine_goal_and_safety.cpp) showed is
-                // not enough to move the settled heading off the goal's own peak. A
-                // logistic in safety_at_goal itself (not comanv_magnitude -- still local/
-                // direction-aware, just sharpened) fixes this: weight=0.5 exactly at
-                // safety_at_goal_threshold, saturating towards 1 as safety_at_goal falls
-                // below it and towards 0 as it rises above -- e.g. at threshold=0.6/
-                // slope=10, safety_at_goal=0.84 (typical open-path value logged above)
-                // gives weight=0.083 (more decisively goal-dominant than the linear
-                // mapping's 0.16), while the worst value actually logged (0.60) gives
-                // weight=0.5 (a real, decisive shift) instead of the linear mapping's 0.40.
-                safety_weight = 1.0 / (1.0 + std::exp (this->safety_at_goal_slope
-                                                        * (safety_at_goal - this->safety_at_goal_threshold)));
-                combined = (goal_vec * (1.0 - safety_weight)) + (safety_vec * safety_weight);
+                // Elementwise (Hadamard) product, no weighting -- checking how the ring
+                // attractor behaves under multiplicative combination instead of averaging.
+                combined = goal_vec * safety_vec;
             }
 
             const double heading_rad = this->heading_ra.find_heading (combined * this->heading_ra_combined_gain);
             float delta_heading = static_cast<float>(heading_rad);
 
-            std::cout << "comanv_magnitude : " << comanv_magnitude << ", safety_weight : " << safety_weight << std::endl;
+            std::cout << "comanv_magnitude : " << comanv_magnitude << std::endl;
             std::cout << "fwd vector : " << fwd[0] << ", " << fwd[2] << std::endl;
             std::cout << "desired heading (deg) : " <<  desired_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
             std::cout << "current heading (deg) : " <<  current_heading_rad * 360.0f/sm::mathconst<float>::two_pi << std::endl;
@@ -2013,6 +1949,18 @@ export namespace craysim
         // safety_at_goal value (see towards_goal_avoiding_collisions()'s own comment) at
         // which the goal/safety blend is exactly 50/50; above it the goal dominates, below
         // it safety dominates. Exposed so it can be tuned at runtime.
+        //
+        // A retune to 0.2 (from a distribution argument -- see git history/prior session
+        // notes if this needs re-deriving) was tried after
+        // RingAttractor::nearness_to_safety_vector()'s own calibration changed, on the
+        // reasoning that the old threshold=0.6 sat inside the new safety_at_goal
+        // distribution's typical range rather than above it. That retune was REVERTED:
+        // confirmed by direct real-world observation that threshold=0.2 (paired with
+        // slope=25) let the agent drive into the obstacle it had previously steered around
+        // cleanly at threshold=0.6/slope=10 -- real observed behaviour overrides the
+        // distribution-percentile argument that motivated the retune. Back to the values
+        // that are actually confirmed working; don't re-attempt the same retune without new
+        // real-world verification.
         float safety_at_goal_threshold = 0.6f;
 
         // Steepness of the safety_at_goal logistic -- larger values make the switch around
