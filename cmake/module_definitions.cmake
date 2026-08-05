@@ -3,34 +3,40 @@
 #
 macro(setup_module_variables_for_craysim craysim_directory mathplot_directory maths_directory json_directory)
 
+  # load the macro 'setup_module_variables_for_maths' from module_definitions.cmake (found in the maths_directory)
+  include(${maths_directory}/cmake/module_definitions.cmake)
+  # Use the macro to load the SM_*_MODULES variables
+  setup_module_variables_for_maths (${maths_directory} ${json_directory})
+
   set(CRAYSIM_MATHS_MODULES
-    ${maths_directory}/sm/hdfdata.cppm
-    ${maths_directory}/sm/config.cppm
-    ${maths_directory}/sm/spline.cppm
-    ${maths_directory}/sm/winder.cppm
-    ${maths_directory}/sm/geometry.cppm
-    ${maths_directory}/sm/random_walk.cppm
-    ${json_directory}/src/modules/json.cppm
+    ${SM_HDFDATA_MODULES}
+    ${SM_CONFIG_MODULES}
+    ${SM_SPLINE_MODULES}
+    ${SM_WINDER_MODULES}
+    ${SM_GEOMETRY_MODULES}
+    ${SM_RANDOM_WALK_MODULES}
   )
+  list(REMOVE_DUPLICATES CRAYSIM_MATHS_MODULES)
+
   set(CRAYSIM_MATHS_DOUBLEHEX_MODULES
-    ${maths_directory}/sm/hdfdata.cppm
-    ${maths_directory}/sm/config.cppm
-    ${json_directory}/src/modules/json.cppm
-    ${maths_directory}/sm/binomial.cppm
-    ${maths_directory}/sm/nm_simplex.cppm
-    ${maths_directory}/sm/bezcoord.cppm
-    ${maths_directory}/sm/bezcurve.cppm
-    ${maths_directory}/sm/bezcurvepath.cppm
-    ${maths_directory}/sm/hex.cppm
-    ${maths_directory}/sm/hexgrid.cppm
-    ${maths_directory}/sm/hexgrid_hdf.cppm
+    ${SM_CONFIG_MODULES}
+    ${SM_BINOMIAL_MODULES}
+    ${SM_NM_SIMPLEX_MODULES}
+    ${SM_BEZCURVEPATH_MODULES}
+    ${SM_HEXGRID_HDF_MODULES}
   )
+  list(REMOVE_DUPLICATES CRAYSIM_MATHS_DOUBLEHEX_MODULES)
+
   set(CRAYSIM_MATHS_ANTBODY_MODULES
-    ${maths_directory}/sm/config.cppm
-    ${json_directory}/src/modules/json.cppm
+    ${SM_CONFIG_MODULES}
   )
 
+  include(${mathplot_directory}/cmake/module_definitions.cmake)
+  setup_module_variables_for_mathplot (${mathplot_directory} ${maths_directory} ${json_directory})
+
+  # Should be the mathplot core + anything else.
   set(CRAYSIM_MATHPLOT_MODULES
+    ${MPLOT_CORE_MODULES}
     ${mathplot_directory}/mplot/fps/profiler.cppm
     ${mathplot_directory}/mplot/compoundray/interop.cppm
     ${mathplot_directory}/mplot/compoundray/Ommatidium.cppm
@@ -40,6 +46,8 @@ macro(setup_module_variables_for_craysim craysim_directory mathplot_directory ma
     ${mathplot_directory}/mplot/NormalsVisual.cppm
     ${mathplot_directory}/mplot/InstancedScatterVisual.cppm
   )
+  list(REMOVE_DUPLICATES CRAYSIM_MATHPLOT_MODULES)
+
   set(CRAYSIM_MATHPLOT_DOUBLEHEX_MODULES
     ${mathplot_directory}/mplot/ScatterVisual.cppm
     ${mathplot_directory}/mplot/QuiverVisual.cppm
