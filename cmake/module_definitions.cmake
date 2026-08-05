@@ -48,12 +48,22 @@ macro(setup_module_variables_for_craysim craysim_directory mathplot_directory ma
   )
 
   set(CRAYSIM_MODULES
+    ${CRAYSIM_MATHS_MODULES}
+    ${CRAYSIM_MATHPLOT_MODULES}
     ${craysim_directory}/modules/craysim_visual.cppm
   )
+  list(REMOVE_DUPLICATES CRAYSIM_MODULES)
+
   set(CRAYSIM_DOUBLEHEX_MODULES
+    ${CRAYSIM_MATHS_DOUBLEHEX_MODULES}
     ${craysim_directory}/modules/craysim_doublehexgrid.cppm
   )
+  list(REMOVE_DUPLICATES CRAYSIM_DOUBLEHEX_MODULES)
+
   set(CRAYSIM_ANTBODY_MODULES
+    ${CRAYSIM_MATHS_ANTBODY_MODULES}
     ${craysim_directory}/modules/craysim_antbody.cppm
   )
+  list(REMOVE_DUPLICATES CRAYSIM_ANTBODY_MODULES)
+
 endmacro()
