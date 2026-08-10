@@ -10,6 +10,8 @@ module;
 #include <cmath>
 #include <limits>
 #include <map>
+#include <tuple>
+#include <expected>
 
 #include <MulticamScene.h>
 #include <libEyeRenderer.h> // getCurrentEyeSamplesPerOmmatidium
@@ -71,6 +73,7 @@ export namespace craysim
         breadcrumbs_keymv, // If true, show breadcrumbs for key-commanded movements
         breadcrumbs_api,   // If true, show breadcrumbs for API-commanded movements
         breadcrumbs_walk,  // If true, show breadcrumbs for random-walk movements
+        find_collisions,  // If true, then find distances to objects that we might collide with. A kind of simulated lidar.
         save_hdf5,        // If true, then save any output data in HDF5 (active in 'path_from_csv' mode)
         debug_mv,         // Open a debug h5 file (craysim.h5) and run compute_mesh_movement once for debug of NavMesh
         show_fps,         // If true, show the FPS in the fps_label
@@ -442,6 +445,7 @@ export namespace craysim
             isv->radiusFixed = 0.004f;
             isv->marker_offset = isv->radiusFixed;
             isv->marker_offset_dirn = sm::vec<>::uy();
+            isv->name = "breadcrumbs";
             isv->finalize();
             this->isvp = this->addVisualModel (isv);
         }
@@ -456,7 +460,7 @@ export namespace craysim
             antca->thickness = 0.6f;
             antca->finalize();
             this->agent_coords = this->addVisualModel (antca);
-            this->agent_coords->name = "agent";
+            this->agent_coords->name = "agent_coords";
             this->agent_coords->setViewMatrix (this->initial_camera_space);
         }
 
@@ -470,7 +474,7 @@ export namespace craysim
             compass_coords_up->thickness = 0.3f;
             compass_coords_up->finalize();
             this->compass_coords = this->addVisualModel (compass_coords_up);
-            this->compass_coords->name = "Compass";
+            this->compass_coords->name = "compass_coords";
             this->compass_coords->setViewMatrix (this->get_compass_matrix());
         }
 
@@ -1474,6 +1478,172 @@ export namespace craysim
         // Time const for frames.
         double frame_tau = 0.0167;
 
+        enum class collision_error
+        {
+            land_is_nullptr,
+            navmesh_is_nullptr,
+            move_not_possible
+        };
+
+        std::uint32_t n_collision_distances = 36;
+        float collision_distance_max = std::numeric_limits<float>::max();
+        // A vvec of tuples containing the collision distance (float) and model ID (std::int32_t) of
+        // the model we'd hit. If model ID is -1 it's the edge of the landscape. If model ID is -2,
+        // it's the end of the search distance (say we try to collide with anything up to 2 m away)
+        sm::vvec<std::tuple<float, std::int32_t>> agent_collision_distances = {};
+
+        // Compare Bounding boxes for each model and our agent model
+        std::int32_t test_agent_bounding_box_intersections (const sm::mat<float, 4>& agent_body_viewmatrix)
+        {
+            std::int32_t rtn = -4;
+            mplot::VisualModel<glver>* _agent = nullptr;
+            if (this->agent_body != nullptr) {
+                // We have an actual agent body to use
+                _agent = this->agent_body;
+            } else {
+                // Fall back to using first EyeVisual as the agent
+                _agent = static_cast<mplot::VisualModel<glver>*>(eyes[0]);
+            }
+            // apply agent_body_viewmatrix to the bbs
+            sm::interval<sm::vec<float>> my_bb = {};
+            my_bb.min = (agent_body_viewmatrix * _agent->bb.min).less_one_dim();
+            my_bb.max = (agent_body_viewmatrix * _agent->bb.max).less_one_dim();
+
+            this->init_vm_accessor();
+            mplot::VisualModel<glver>* mdl = this->get_next_vm_accessor();
+            while (mdl) {
+                if (mdl != this->land
+                    && mdl != isvp // breadcrumbs
+                    && mdl != _agent
+                    && mdl != this->agent_coords
+                    && mdl != this->compass_coords) {
+                    std::cout << "Collision detection on model " << mdl->name << std::endl;
+                    auto bb = mdl->get_viewmatrix_modelbb();
+                    if (bb.intersects (my_bb)) {
+                        // collision!
+                        std::cout << "Collision between agent and " << mdl->name << "!\n";
+                        rtn = 100;
+                        return rtn;
+                    }
+                } // else: std::cout << "Skipping " << mdl->name << std::endl;
+                mdl = this->get_next_vm_accessor();
+            }
+
+            return rtn;
+        }
+
+        // In direction @dirn play forward a 'virtual agent movement' until we hit either the
+        // bounding box of a non-landscape model, or the edge of the landscape. Return a tuple
+        // containing the distance to the collision (and which model it was). If model ID is -1 it's
+        // the edge of the landscape. If model ID is -2, it's the end of the search distance @up_to (say we
+        // try to collide with anything up to 2 m away)
+        std::expected <std::tuple<float, std::int32_t>, collision_error> compute_collision_distance (const float dirn, const float up_to = 5.0f)
+        {
+            //std::cout << __func__ << " called to find collision in (ego) direction " << dirn << std::endl;
+            if (this->land == nullptr) { return std::unexpected (collision_error::land_is_nullptr); }
+            if (this->land->navmesh == nullptr) { return std::unexpected (collision_error::navmesh_is_nullptr); }
+
+            std::tuple<float, std::int32_t> rtn = {};
+
+            // Get the current camera space
+            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+
+            //std::cout << "cam_to_scene at start:\n" << cam_to_scene << std::endl;
+
+            // In the camera's frame, y is up
+            sm::vec<float> cam_y = (cam_to_scene * sm::vec<float>::uy()).less_one_dim();
+
+            // Set the angle of the camera space
+            sm::mat<float, 4> rotn (sm::quaternion<float>(cam_y, dirn));
+
+            cam_to_scene = rotn * cam_to_scene; // or cam_to_scene * rotn; I never know which.
+
+            // By computing mesh movement, we may change the navmesh's ti0, so we will need to reset it at the end
+            std::uint32_t ti0_sv = this->land->navmesh->ti0;
+
+            bool collided = false;
+            float search_distance = 0.0f;
+            std::uint32_t search_move_count = 0;
+
+            // Get characteristic movement distance from agent BB
+            mplot::VisualModel<glver>* _agent = nullptr;
+            if (this->agent_body != nullptr) {
+                // We have an actual agent body to use
+                _agent = this->agent_body;
+            } else {
+                // Fall back to using first EyeVisual as the agent
+                _agent = static_cast<mplot::VisualModel<glver>*>(eyes[0]);
+            }
+            float agent_sz = _agent->bb.span().mean();
+
+            while (!collided && search_distance < up_to) {
+
+                // Save a copy of the camera space
+                sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
+
+                // Create a movement wrt our camera forwards direction z.
+                sm::vec<float> mv_camframe = {0, 0, agent_sz}; // set this to always forwards a bit. Perhaps a distance determined from the size of the *agent*?
+
+                try {
+                    cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
+                    //std::cout << "cam_to_scene after compute_mesh_movement:\n" << cam_to_scene << std::endl;
+
+                    // Now we have moved, can compute instantaneous velocity
+                    auto _instantaneous_velocity = cam_to_scene.translation() - cam_to_scene_sv.translation();
+                    search_distance += _instantaneous_velocity.length();
+                    // Have moved, does the linear distance between last location and this location cross a bounding box?
+                    std::int32_t id = this->test_agent_bounding_box_intersections (cam_to_scene);
+                    if (id > 0) {
+                        // BB says collision occurred
+                        rtn = { search_distance, id };
+                        std::cerr << "BB says collision occurred with id " << id << "\n";
+                    } else {
+                        if (search_distance >= up_to) {
+                            rtn = { search_distance, -2 };
+                            // std::cerr << "search_distance = " << search_distance << " >= up_to = " << up_to << ", so end without collision\n";
+                        }
+                    }
+                    ++search_move_count;
+
+                } catch (const std::exception& e) {
+                    std::string msg (e.what());
+                    if (msg.find ("off-edge:") == 0) {
+                        // Went off edge, that's the collision.
+                        // RECORD into rtn
+                        rtn = { search_distance, -1 };
+                        std::cerr << "Off-edge, so collided\n";
+                        collided = true;
+                    } else {
+                        std::cerr << "that move was not possible: " << msg << "\n";
+                        return std::unexpected (collision_error::move_not_possible);
+                    }
+                }
+            }
+
+            std::cout << "Completed in " << search_move_count << " search movements\n";
+
+            this->land->navmesh->ti0 = ti0_sv; // Location of the actual camera (which was never moved)
+
+            return rtn;
+        }
+
+        // In some number of directions around the circle (say 360 at 1 degree intervals or 72 at 5
+        // degree intervals) play forward a 'virtual agent movement' until we hit either the
+        // bounding box of a non-landscape model, or the edge of the landscape. Record the distance
+        // to the collision (and which model it was)
+        void compute_collision_distances()
+        {
+            if (this->agent_collision_distances.size() != this->n_collision_distances) {
+                this->agent_collision_distances.resize (this->n_collision_distances, {});
+            }
+
+            for (std::uint32_t i = 0; i < this->n_collision_distances; ++i) {
+                float dirn = (sm::mathconst<float>::two_pi * i) / n_collision_distances;
+                auto res = this->compute_collision_distance (dirn);
+                if (res) { this->agent_collision_distances[i] = res.value(); }
+            }
+        }
+
         // Call this from your main loop. Returns true if slow windows were processed
         bool render_and_poll ()
         {
@@ -1535,6 +1705,12 @@ export namespace craysim
                        && this->sim_opts.any_of ({craysim::options::api_movement, craysim::options::homing_mode})) {
                 this->api_rotate(); // BUT don't inc move counter! This enables rotating while paused
             }
+
+            // Having moved, if we need to, we can re-compute the distance to any non-landscape objects that we might collide with.
+            if (this->sim_opts.test (craysim::options::find_collisions)) {
+                this->compute_collision_distances();
+            }
+
             std::uint32_t camidx = 0;
             // Call the compound-ray ray casting method to recompute the compound-eye view of the scene
             renderFrame();
