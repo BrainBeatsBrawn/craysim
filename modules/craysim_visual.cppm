@@ -280,6 +280,7 @@ export namespace craysim
             this->agent_eyevisual_gamma = _agent_gamma;
             this->setup_eyevisual();
             this->setup_breadcrumbs (1000u); // default 1000 breadcrumbs
+            this->setup_collisvis (1000u);
             this->setup_agent_coords (prog_opts.agent_coord_len);
             this->setup_compass_coords (prog_opts.agent_coord_len);
 
@@ -418,6 +419,30 @@ export namespace craysim
             this->eyes[0] = this->addVisualModel (eyevm);
             // This eye is the followed VM. If you teleport somewhere (such as with csv_playback) you have to call this again.
             this->setFollowedVM (this->eyes[0]);
+        }
+
+        // Collision visualization, to debug collision detection
+        void setup_collisvis (std::uint64_t max_cv)
+        {
+            if (this->cvisvp != nullptr) {
+                // check max_bc same as max_instances
+                if (max_cv == cvisvp->max_instances) {
+                    // Nothing to do
+                    return;
+                }
+                // Remove existing
+                this->removeVisualModel (this->cvisvp);
+                this->cvisvp = nullptr;
+            }
+            auto cvisv = std::make_unique<mplot::InstancedScatterVisual<glver>> (sm::vec<>{});
+            cvisv->set_parent (this->get_id());
+            cvisv->max_instances = max_cv;
+            cvisv->radiusFixed = 0.02f;
+            cvisv->marker_offset = cvisv->radiusFixed;
+            cvisv->marker_offset_dirn = sm::vec<>::uy();
+            cvisv->name = "collisvis";
+            cvisv->finalize();
+            this->cvisvp = this->addVisualModel (cvisv);
         }
 
         // Breadcrumb trail for max_bc breadcrumbs. Called at start of program, can be re-called
@@ -573,6 +598,21 @@ export namespace craysim
             } else {
                 this->isvp->set_instance_data (this->breadcrumb_coords, this->bc_clr, this->bc_alpha, this->bc_scale);
             }
+        }
+
+        void clear_collisvis()
+        {
+            this->cv_coords.clear();
+            this->cvisvp->set_instance_data (this->cv_coords);
+        }
+
+        void add_collisvis (const sm::vec<>& _location)
+        {
+            if (this->cvisvp == nullptr) { return; }
+            if (this->cv_coords.size() < this->cvisvp->max_instances) {
+                this->cv_coords.push_back (_location);
+            } // else do nothing
+            this->cvisvp->set_instance_data (this->cv_coords, this->cv_clr, this->cv_alpha, this->cv_scale);
         }
 
         // Get access to the landscape VisualModel by searching for a selection of model names
@@ -1485,17 +1525,15 @@ export namespace craysim
             move_not_possible
         };
 
-        std::uint32_t n_collision_distances = 36;
+        std::uint32_t n_collision_distances = 18;
         float collision_distance_max = std::numeric_limits<float>::max();
         // A vvec of tuples containing the collision distance (float) and model ID (std::int32_t) of
         // the model we'd hit. If model ID is -1 it's the edge of the landscape. If model ID is -2,
         // it's the end of the search distance (say we try to collide with anything up to 2 m away)
         sm::vvec<std::tuple<float, std::int32_t>> agent_collision_distances = {};
 
-        // Compare Bounding boxes for each model and our agent model
-        std::int32_t test_agent_bounding_box_intersections (const sm::mat<float, 4>& agent_body_viewmatrix)
+        mplot::VisualModel<glver>* best_agent_body()
         {
-            std::int32_t rtn = -4;
             mplot::VisualModel<glver>* _agent = nullptr;
             if (this->agent_body != nullptr) {
                 // We have an actual agent body to use
@@ -1504,6 +1542,14 @@ export namespace craysim
                 // Fall back to using first EyeVisual as the agent
                 _agent = static_cast<mplot::VisualModel<glver>*>(eyes[0]);
             }
+            return _agent;
+        }
+
+        // Compare Bounding boxes for each model and our agent model
+        std::int32_t test_agent_bounding_box_intersections (const sm::mat<float, 4>& agent_body_viewmatrix)
+        {
+            std::int32_t rtn = -4;
+            mplot::VisualModel<glver>* _agent = this->best_agent_body();
             // apply agent_body_viewmatrix to the bbs
             sm::interval<sm::vec<float>> my_bb = {};
             my_bb.min = (agent_body_viewmatrix * _agent->bb.min).less_one_dim();
@@ -1514,10 +1560,11 @@ export namespace craysim
             while (mdl) {
                 if (mdl != this->land
                     && mdl != isvp // breadcrumbs
+                    && mdl != cvisvp // collision visualization
                     && mdl != _agent
                     && mdl != this->agent_coords
                     && mdl != this->compass_coords) {
-                    std::cout << "Collision detection on model " << mdl->name << std::endl;
+                    // std::cout << "Collision detection on model " << mdl->name << std::endl;
                     auto bb = mdl->get_viewmatrix_modelbb();
                     if (bb.intersects (my_bb)) {
                         // collision!
@@ -1537,7 +1584,7 @@ export namespace craysim
         // containing the distance to the collision (and which model it was). If model ID is -1 it's
         // the edge of the landscape. If model ID is -2, it's the end of the search distance @up_to (say we
         // try to collide with anything up to 2 m away)
-        std::expected <std::tuple<float, std::int32_t>, collision_error> compute_collision_distance (const float dirn, const float up_to = 5.0f)
+        std::expected <std::tuple<float, std::int32_t>, collision_error> compute_collision_distance (const float dirn, const float up_to = 15.0f)
         {
             //std::cout << __func__ << " called to find collision in (ego) direction " << dirn << std::endl;
             if (this->land == nullptr) { return std::unexpected (collision_error::land_is_nullptr); }
@@ -1556,7 +1603,12 @@ export namespace craysim
             // Set the angle of the camera space
             sm::mat<float, 4> rotn (sm::quaternion<float>(cam_y, dirn));
 
-            cam_to_scene = rotn * cam_to_scene; // or cam_to_scene * rotn; I never know which.
+            sm::vec<float> cam_tran = cam_to_scene.translation();
+            sm::mat<float, 4> tr1;
+            tr1.translate (cam_tran);
+            sm::mat<float, 4> tr2;
+            tr2.translate (-cam_tran);
+            cam_to_scene = tr1 * rotn * tr2 * cam_to_scene; // I never get this right first time (or third)...
 
             // By computing mesh movement, we may change the navmesh's ti0, so we will need to reset it at the end
             std::uint32_t ti0_sv = this->land->navmesh->ti0;
@@ -1566,14 +1618,7 @@ export namespace craysim
             std::uint32_t search_move_count = 0;
 
             // Get characteristic movement distance from agent BB
-            mplot::VisualModel<glver>* _agent = nullptr;
-            if (this->agent_body != nullptr) {
-                // We have an actual agent body to use
-                _agent = this->agent_body;
-            } else {
-                // Fall back to using first EyeVisual as the agent
-                _agent = static_cast<mplot::VisualModel<glver>*>(eyes[0]);
-            }
+            mplot::VisualModel<glver>* _agent = this->best_agent_body();
             float agent_sz = _agent->bb.span().mean();
 
             while (!collided && search_distance < up_to) {
@@ -1587,6 +1632,8 @@ export namespace craysim
                 try {
                     cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
                     //std::cout << "cam_to_scene after compute_mesh_movement:\n" << cam_to_scene << std::endl;
+
+                    this->add_collisvis (cam_to_scene.translation());
 
                     // Now we have moved, can compute instantaneous velocity
                     auto _instantaneous_velocity = cam_to_scene.translation() - cam_to_scene_sv.translation();
@@ -1622,7 +1669,7 @@ export namespace craysim
 
             std::cout << "Completed in " << search_move_count << " search movements\n";
 
-            this->land->navmesh->ti0 = ti0_sv; // Location of the actual camera (which was never moved)
+            this->land->navmesh->ti0 = ti0_sv; // Back to the location of the actual camera (which was never moved)
 
             return rtn;
         }
@@ -1636,6 +1683,8 @@ export namespace craysim
             if (this->agent_collision_distances.size() != this->n_collision_distances) {
                 this->agent_collision_distances.resize (this->n_collision_distances, {});
             }
+
+            this->clear_collisvis();
 
             for (std::uint32_t i = 0; i < this->n_collision_distances; ++i) {
                 float dirn = (sm::mathconst<float>::two_pi * i) / n_collision_distances;
@@ -1707,7 +1756,8 @@ export namespace craysim
             }
 
             // Having moved, if we need to, we can re-compute the distance to any non-landscape objects that we might collide with.
-            if (this->sim_opts.test (craysim::options::find_collisions)) {
+            if (this->sim_opts.test (craysim::options::find_collisions) && this->instantaneous_velocity.length() > 0.0f) {
+                std::cout << "Inst. velocity: " << this->instantaneous_velocity << " so we moved. Compute collision distances..." << std::endl;
                 this->compute_collision_distances();
             }
 
@@ -1950,6 +2000,14 @@ export namespace craysim
         std::uint32_t breadcrumb_every = 1u;
         // Overall size multiplier for breadcrumbs
         float bc_mult = 1.0f;
+
+        // Visualization of collision detection (Collision Visualization cv)
+        mplot::InstancedScatterVisual<glver>* cvisvp = nullptr;
+        // Container for collisvis locations
+        sm::vvec<sm::vec<float, 3>> cv_coords = {};
+        sm::vvec<std::array<float, 3>> cv_clr = { mplot::colour::crimson };
+        sm::vvec<float> cv_alpha = { 1.0f };
+        sm::vvec<float> cv_scale = { 1.0f };
 
         // Client code gives us names of the navigation landscape. If we find the landscape, store a pointer to it with this
         mplot::VisualModel<glver>* land = nullptr;
