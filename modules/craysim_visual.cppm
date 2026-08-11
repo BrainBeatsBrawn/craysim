@@ -1622,13 +1622,13 @@ export namespace craysim
             mplot::VisualModel<glver>* _agent = this->best_agent_body();
             float agent_sz = _agent->bb.span().mean();
 
+            // Create a movement wrt our camera forwards direction z.
+            sm::vec<float> mv_camframe = {0, 0, agent_sz};
+
             while (!collided && search_distance < up_to) {
 
                 // Save a copy of the camera space
                 sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
-
-                // Create a movement wrt our camera forwards direction z.
-                sm::vec<float> mv_camframe = {0, 0, agent_sz}; // set this to always forwards a bit. Perhaps a distance determined from the size of the *agent*?
 
                 try {
                     cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
