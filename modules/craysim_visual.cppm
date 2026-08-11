@@ -1592,24 +1592,22 @@ export namespace craysim
 
             std::tuple<float, std::int32_t> rtn = {};
 
-            // Get the current camera space
+            // Get the current camera space (could happen once in compute_collision_distances)
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
-
-            //std::cout << "cam_to_scene at start:\n" << cam_to_scene << std::endl;
-
+            // Compute translations (could happen once in compute_collision_distances)
             sm::vec<float> cam_tran = cam_to_scene.translation();
             sm::mat<float, 4> tr1;
             tr1.translate (cam_tran);
             sm::mat<float, 4> tr2;
             tr2.translate (-cam_tran);
-
-            // In the camera's frame, y is up
+            // In the camera's frame, y is up (could happen once in compute_collision_distances)
             sm::vec<float> cam_y = ((tr2 * cam_to_scene) * sm::vec<float>::uy()).less_one_dim();
 
-            // Set the angle of the camera space
+            // Set the angle of the camera space (must occur in this function)
             sm::mat<float, 4> rotn (sm::quaternion<float>(cam_y, dirn));
 
-            cam_to_scene = tr1 * rotn * tr2 * cam_to_scene; // I never get this right first time (or third)...
+            // Rotate the virtual agent camera to our chosen direction
+            cam_to_scene = tr1 * rotn * tr2 * cam_to_scene;
 
             // By computing mesh movement, we may change the navmesh's ti0, so we will need to reset it at the end
             std::uint32_t ti0_sv = this->land->navmesh->ti0;
@@ -1632,7 +1630,6 @@ export namespace craysim
 
                 try {
                     cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
-                    //std::cout << "cam_to_scene after compute_mesh_movement:\n" << cam_to_scene << std::endl;
 
                     this->add_collisvis (cam_to_scene.translation());
 
@@ -1656,13 +1653,9 @@ export namespace craysim
                 } catch (const std::exception& e) {
                     std::string msg (e.what());
                     if (msg.find ("off-edge:") == 0) {
-                        // Went off edge, that's the collision.
-                        // RECORD into rtn
-                        rtn = { search_distance, -1 };
-                        std::cerr << "Off-edge, so collided\n";
+                        rtn = { search_distance, -1 }; // Went off edge, that's the collision.
                         collided = true;
                     } else {
-                        std::cerr << "that move was not possible: " << msg << "\n";
                         return std::unexpected (collision_error::move_not_possible);
                     }
                 }
