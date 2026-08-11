@@ -437,7 +437,7 @@ export namespace craysim
             auto cvisv = std::make_unique<mplot::InstancedScatterVisual<glver>> (sm::vec<>{});
             cvisv->set_parent (this->get_id());
             cvisv->max_instances = max_cv;
-            cvisv->radiusFixed = 0.02f;
+            cvisv->radiusFixed = 0.1f;
             cvisv->marker_offset = cvisv->radiusFixed;
             cvisv->marker_offset_dirn = sm::vec<>::uy();
             cvisv->name = "collisvis";
@@ -1597,17 +1597,18 @@ export namespace craysim
 
             //std::cout << "cam_to_scene at start:\n" << cam_to_scene << std::endl;
 
-            // In the camera's frame, y is up
-            sm::vec<float> cam_y = (cam_to_scene * sm::vec<float>::uy()).less_one_dim();
-
-            // Set the angle of the camera space
-            sm::mat<float, 4> rotn (sm::quaternion<float>(cam_y, dirn));
-
             sm::vec<float> cam_tran = cam_to_scene.translation();
             sm::mat<float, 4> tr1;
             tr1.translate (cam_tran);
             sm::mat<float, 4> tr2;
             tr2.translate (-cam_tran);
+
+            // In the camera's frame, y is up
+            sm::vec<float> cam_y = ((tr2 * cam_to_scene) * sm::vec<float>::uy()).less_one_dim();
+
+            // Set the angle of the camera space
+            sm::mat<float, 4> rotn (sm::quaternion<float>(cam_y, dirn));
+
             cam_to_scene = tr1 * rotn * tr2 * cam_to_scene; // I never get this right first time (or third)...
 
             // By computing mesh movement, we may change the navmesh's ti0, so we will need to reset it at the end
@@ -2005,7 +2006,7 @@ export namespace craysim
         mplot::InstancedScatterVisual<glver>* cvisvp = nullptr;
         // Container for collisvis locations
         sm::vvec<sm::vec<float, 3>> cv_coords = {};
-        sm::vvec<std::array<float, 3>> cv_clr = { mplot::colour::crimson };
+        sm::vvec<std::array<float, 3>> cv_clr = { mplot::colour::darkolivegreen2 };
         sm::vvec<float> cv_alpha = { 1.0f };
         sm::vvec<float> cv_scale = { 1.0f };
 
