@@ -1550,15 +1550,24 @@ export namespace craysim
         std::int32_t test_agent_bounding_box_intersections (const sm::mat<float, 4>& agent_body_viewmatrix)
         {
             // std::cout << __func__ << " called for agent viewmatrix\n" << agent_body_viewmatrix << std::endl;
+
+            // method 1 is modified, rotated aabbs (which become distorted)
+            // method 2 is the oriented bounding box
+            constexpr int isect_method = 2;
+
             std::int32_t rtn = -4;
             mplot::VisualModel<glver>* _agent = this->best_agent_body();
-            //std::cout << "agent BB without transformation: " << _agent->bb << std::endl;
-            // apply agent_body_viewmatrix to the bbs
-            sm::interval<sm::vec<float>> my_bb = {};
-            my_bb.min = (agent_body_viewmatrix * _agent->bb.min).less_one_dim();
-            my_bb.max = (agent_body_viewmatrix * _agent->bb.max).less_one_dim();
-            my_bb.make_valid_aabb();
-            //std::cout << "agent BB *with* transformation: " << my_bb << std::endl;
+
+            sm::interval<sm::vec<float>> my_bb = {}; // for method 1
+            sm::mat<float, 3, 4> my_obb = {};        // for method 2
+
+            if constexpr (isect_method == 1) {
+                my_bb.min = (agent_body_viewmatrix * _agent->bb.min).less_one_dim();
+                my_bb.max = (agent_body_viewmatrix * _agent->bb.max).less_one_dim();
+                my_bb.make_valid_aabb();
+            } else if constexpr (isect_method == 2) {
+                my_obb = _agent->get_viewmatrix_obb (agent_body_viewmatrix);
+            }
 
             this->init_vm_accessor();
             mplot::VisualModel<glver>* mdl = this->get_next_vm_accessor();
@@ -1569,23 +1578,42 @@ export namespace craysim
                     && mdl != _agent
                     && mdl != this->agent_coords
                     && mdl != this->compass_coords) {
-                    // std::cout << "Collision detection on model " << mdl->name << std::endl;
-                    auto bb = mdl->get_viewmatrix_modelbb();
-                    // This bb is aligned with the VisualModel, and may have been rotated with a viewmatrix.
-                    bb.make_valid_aabb(); // swaps dims where necessary
-                    // std::cout << "Model " << mdl->name << " BB: " << bb << " compare with my BB: " << my_bb << std::endl;
-                    // std::cout << " bb.intersects (my_bb) = " << (bb.intersects (my_bb) ? "T" : "F") << std::endl;
-                    if (bb.intersects (my_bb)) {
-                        // collision!
-                        // std::cout << "Collision between agent and " << mdl->name << "!\n";
-                        std::uint32_t mdl_id = sm::crc32 (mdl->name);
-                        if (mdl_id < std::numeric_limits<std::int32_t>::max()) {
-                            rtn = static_cast<std::int32_t>(mdl_id);
-                        } else {
-                            rtn = std::numeric_limits<std::int32_t>::max();
+
+                    if constexpr (isect_method == 1) {
+                        // std::cout << "Collision detection on model " << mdl->name << std::endl;
+                        auto bb = mdl->get_viewmatrix_modelbb();
+                        // This bb is aligned with the VisualModel, and may have been rotated with a viewmatrix.
+                        bb.make_valid_aabb(); // swaps dims where necessary
+                        // std::cout << "Model " << mdl->name << " BB: " << bb << " compare with my BB: " << my_bb << std::endl;
+                        // std::cout << " bb.intersects (my_bb) = " << (bb.intersects (my_bb) ? "T" : "F") << std::endl;
+                        if (bb.intersects (my_bb)) {
+                            // collision!
+                            // std::cout << "Collision between agent and " << mdl->name << "!\n";
+                            std::uint32_t mdl_id = sm::crc32 (mdl->name);
+                            if (mdl_id < std::numeric_limits<std::int32_t>::max()) {
+                                rtn = static_cast<std::int32_t>(mdl_id);
+                            } else {
+                                rtn = std::numeric_limits<std::int32_t>::max();
+                            }
+                            return rtn;
                         }
-                        return rtn;
-                    }
+                    } else if constexpr (isect_method == 2) {
+                        // Get the model's oriented bounding box (the compute in here may be
+                        // repeated many times and is acandidate for optimization)
+                        sm::mat<float, 3, 4> obb = mdl->get_viewmatrix_obb();
+                        // Do oriented bounding box collision detection
+                        if (this->collision_detect (my_obb, obb)) {
+                            std::uint32_t mdl_id = sm::crc32 (mdl->name);
+                            if (mdl_id < std::numeric_limits<std::int32_t>::max()) {
+                                rtn = static_cast<std::int32_t>(mdl_id);
+                            } else {
+                                rtn = std::numeric_limits<std::int32_t>::max();
+                            }
+                            return rtn;
+                        }
+
+                    } // else nothing, no collisions will be detected
+
                 } // else: std::cout << "Skipping " << mdl->name << std::endl;
                 mdl = this->get_next_vm_accessor();
             }
