@@ -1571,7 +1571,7 @@ export namespace craysim
                     // repeated many times and is acandidate for optimization)
                     sm::mat<float, 3, 4> obb = mdl->get_viewmatrix_obb();
                     // Do oriented bounding box collision detection
-                    if (this->collision_detect (my_obb, obb)) {
+                    if (sm::geometry::obb_collision_detect (my_obb, obb)) {
                         std::uint32_t mdl_id = sm::crc32 (mdl->name);
                         if (mdl_id < std::numeric_limits<std::int32_t>::max()) {
                             rtn = static_cast<std::int32_t>(mdl_id);
