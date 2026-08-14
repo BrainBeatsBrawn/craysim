@@ -1593,11 +1593,11 @@ export namespace craysim
          * bounding box of a non-landscape model, or the edge of the landscape. Return a tuple
          * containing the distance to the collision (and which model ID it was, cast to int32_t). If
          * model ID is -1 it was the edge of the landscape. If model ID is -2, it was the end of the
-         * search distance @up_to (say we try to collide with anything up to 15 m away).
+         * search distance up @up_to agent sizes/bodylengths
          *
          * Note experimentation with std::expected in return type.
          */
-        std::expected <std::tuple<float, std::int32_t>, collision_error> compute_collision_distance (const float dirn, const float up_to = 15.0f)
+        std::expected <std::tuple<float, std::int32_t>, collision_error> compute_collision_distance (const float dirn, const std::uint32_t up_to)
         {
             //std::cout << __func__ << " called to find collision in (ego) direction " << dirn << std::endl;
             if (this->land == nullptr) { return std::unexpected (collision_error::land_is_nullptr); }
@@ -1634,12 +1634,13 @@ export namespace craysim
             // Want to scale agent_sz by the scaling present in get_viewmatrix.
             sm::vec<float, 3> agent_scale = _agent->getViewMatrix().scaling_vec();
             agent_sz *= agent_scale[0]; // Assume uniform scaling
-            std::cout << "Agent size: " << agent_sz << " from scaling: " << agent_scale << std::endl;
+
+            float up_to_dist = agent_sz * up_to;
 
             // Create a movement wrt our camera forwards direction z.
             sm::vec<float> mv_camframe = {0, 0, agent_sz};
 
-            while (!collided && search_distance < up_to) {
+            while (!collided && search_distance < up_to_dist) {
 
                 // Save a copy of the camera space
                 sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
@@ -1661,7 +1662,7 @@ export namespace craysim
                         rtn = { search_distance, id };
                         collided = true;
                     } else {
-                        if (search_distance >= up_to) { rtn = { search_distance, -2 }; }
+                        if (search_distance >= up_to_dist) { rtn = { search_distance, -2 }; }
                     }
 
                 } catch (const std::exception& e) {
@@ -1769,11 +1770,19 @@ export namespace craysim
                 this->agent_collision_distances.resize (this->n_collision_distances, {});
             }
 
-            if (this->sim_opts.test (craysim::options::visualize_collisions)) { this->clear_collisvis(); }
+            std::uint32_t up_to = 10;
+
+            if (this->sim_opts.test (craysim::options::visualize_collisions)) {
+                this->clear_collisvis();
+                // Check we have enough vizualization space
+                if (up_to * this->n_collision_distances > this->cvisvp->max_instances) {
+                    std::cout << "Not enough space, set up_to lower\n";
+                }
+            }
 
             for (std::uint32_t i = 0; i < this->n_collision_distances; ++i) {
                 float dirn = (sm::mathconst<float>::two_pi * i) / n_collision_distances;
-                auto res = this->compute_collision_distance (dirn);
+                auto res = this->compute_collision_distance (dirn, up_to);
                 if (res) { this->agent_collision_distances[i] = res.value(); }
             }
         }
