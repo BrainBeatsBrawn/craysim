@@ -1671,6 +1671,49 @@ export namespace craysim
             return rtn;
         }
 
+        std::string format_collision_distance (const std::tuple<float, std::int32_t>& cd)
+        {
+            auto[dist, modelid] = cd;
+            std::string mid = {};
+            if (modelid < -2) {
+                mid = "unexpected";
+            } else if (modelid == -2) {
+                mid = "max-search";
+            } else if (modelid == -1) {
+                mid = "land-edge";
+            } else {
+                mid = std::format ("vm {}", modelid);
+            }
+            return std::format("{:.2f} ({})", dist, mid);
+        }
+
+        // Find the distance , angle (degrees) and model ID to the closest collision
+        std::tuple<float, float, std::int32_t> get_closest_collision_distance()
+        {
+            // distance, angle, modelid
+            std::tuple<float, float, std::int32_t> rtn = {};
+
+            const float ainc = 360.0f / this->agent_collision_distances.size();
+            float angle = 0.0f;
+            float closest = std::numeric_limits<float>::max();
+            for (std::uint32_t i = 0; i < this->agent_collision_distances.size(); ++i) {
+                auto[dist, modelid] = this->agent_collision_distances[i];
+                if (dist < closest) {
+                    rtn = {dist, angle, modelid};
+                    closest = dist;
+                }
+                angle += ainc;
+            }
+            return rtn;
+        }
+
+        std::string get_closest_collision_distance_str()
+        {
+            auto[dist, angle, modelid] = this->get_closest_collision_distance();
+            std::tuple<float, std::int32_t> cd = { dist, modelid };
+            return std::format ("Bearing {} collides in {}", angle, this->format_collision_distance (cd));
+        }
+
         // From agent_collision_distances, get the distance to collision for the angle degrees
         // (using the best data we have)
         std::tuple<float, std::int32_t> get_collision_distance (const float degrees)
@@ -1696,18 +1739,7 @@ export namespace craysim
 
         std::string get_collision_distance_str (const float degrees)
         {
-            auto[dist, modelid] = this->get_collision_distance (degrees);
-            std::string mid = {};
-            if (modelid < -2) {
-                mid = "unexpected";
-            } else if (modelid == -2) {
-                mid = "max-search";
-            } else if (modelid == -1) {
-                mid = "land-edge";
-            } else {
-                mid = std::format ("vm {}", modelid);
-            }
-            return std::format("{:.2f} ({})", dist, mid);
+            return this->format_collision_distance (this->get_collision_distance (degrees));
         }
 
         // In some number of directions around the circle (say 360 at 1 degree intervals or 72 at 5
@@ -1798,6 +1830,7 @@ export namespace craysim
                 this->compute_collision_distances();
 
                 std::cout << "Safe distance in ego forwards: " << this->get_collision_distance_str (0.0f) << std::endl;
+                std::cout << "Closest safe distance: " << this->get_closest_collision_distance_str() << std::endl;
             }
 
             std::uint32_t camidx = 0;
