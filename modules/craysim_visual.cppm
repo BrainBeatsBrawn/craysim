@@ -1531,7 +1531,7 @@ export namespace craysim
             move_not_possible
         };
 
-        std::uint32_t n_collision_distances = 180;
+        std::uint32_t n_collision_distances = 18;
         float collision_distance_max = std::numeric_limits<float>::max();
         // A vvec of tuples containing the collision distance (float) and model ID (the index into
         // VisualOwnable::vm for the model, cast to std::int32_t) of the model we'd hit. If model
@@ -2369,6 +2369,13 @@ export namespace craysim
                 } else if (key == mplot::key::space) {
                     this->vstate.flip (state::paused);
 
+                } else if (key == mplot::key::n0) {
+                    sim_opts.flip (craysim::options::visualize_collisions);
+                    sim_opts.set (craysim::options::find_collisions, sim_opts.test (craysim::options::visualize_collisions));
+                    if (this->sim_opts.test (craysim::options::visualize_collisions) == false && this->cvisvp != nullptr) {
+                        this->clear_collisvis();
+                    }
+
                 } else if (key == mplot::key::page_up) {
                     int csamp = getCurrentEyeSamplesPerOmmatidium();
                     if (csamp < 32000) {
@@ -2407,6 +2414,7 @@ export namespace craysim
                           << "c: Show agent's camera coordinate frame\n"
                           << "e: Show agent's compass frame\n"
                           << "o: Flip homing mode\n"
+                          << "0: Flip collision computation/visualization\n"
                           << "Esc: Call stop()\n"
                           << "f: Step when paused\n"
                           << "space: pause\n"
