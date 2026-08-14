@@ -971,6 +971,7 @@ export namespace craysim
                                         this->api_cam_rotn_axis[0],
                                         this->api_cam_rotn_axis[1],
                                         this->api_cam_rotn_axis[2]);
+            this->instantaneous_rotation = true;
 
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
 
@@ -1039,6 +1040,7 @@ export namespace craysim
                                         this->api_cam_rotn_axis[0],
                                         this->api_cam_rotn_axis[1],
                                         this->api_cam_rotn_axis[2]);
+            this->instantaneous_rotation = true;
 
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
 
@@ -1121,6 +1123,7 @@ export namespace craysim
         {
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
             if (this->is_actively_rotating()) {
+                this->instantaneous_rotation = true;
                 // Up-down (pitch) is rotation about local camera frame axis x
                 rotateCamerasLocallyAround (this->get_vertical_rotation_angle(), 1.0f, 0.0f, 0.0f);
                 // Left-and-right (yaw) is rotation about local camera frame axis y
@@ -1159,6 +1162,7 @@ export namespace craysim
 
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
             if (this->is_actively_rotating()) {
+                this->instantaneous_rotation = true;
                 // Up-down (pitch) is rotation about local camera frame axis x
                 rotateCamerasLocallyAround (this->get_vertical_rotation_angle(), 1.0f, 0.0f, 0.0f);
                 // Left-and-right (yaw) is rotation about local camera frame axis y
@@ -1261,6 +1265,7 @@ export namespace craysim
             this->rrg->step();
             // rrg.omega is the angular speed rrg.speed is the linear speed
             rotateCamerasLocallyAround (this->rrg->omega, 0.0f, 1.0f, 0.0f);
+            this->instantaneous_rotation = true;
             cam_to_scene = mplot::compoundray::getCameraSpace (scene);
             // ti0, mv_camframe, cam_to_scene to save.
             sm::vec<float> mv_camframe = { 0, 0, this->rrg->speed };
@@ -1291,6 +1296,7 @@ export namespace craysim
             this->rrg->step();
             // rrg.omega is the angular speed rrg.speed is the linear speed
             rotateCamerasLocallyAround (this->rrg->omega, 0.0f, 1.0f, 0.0f);
+            this->instantaneous_rotation = true;
             cam_to_scene = mplot::compoundray::getCameraSpace (scene);
             // ti0, mv_camframe, cam_to_scene to save.
             sm::vec<float> mv_camframe = { 0, 0, this->rrg->speed };
@@ -1821,6 +1827,7 @@ export namespace craysim
             this->setContext(); // right now key move over land needs main window's context
 
             this->instantaneous_velocity = {}; // velocity computed per render cycle
+            this->instantaneous_rotation = false;
 
             this->agent_coords->setHide (!this->vstate.test(craysim::visual<glver>::state::show_camframe));
             if (this->compass_coords != nullptr) {
@@ -1860,8 +1867,7 @@ export namespace craysim
 
             // Having moved, if we need to, we can re-compute the distance to any non-landscape objects that we might collide with.
             if (this->sim_opts.test (craysim::options::find_collisions)
-                && (this->instantaneous_velocity.length() > 0.0f)
-                /* || rotated */) {
+                && (this->instantaneous_velocity.length() > 0.0f || this->instantaneous_rotation == true)) {
                 this->compute_collision_distances();
 
                 // Here's how to access the information computed in compute_collision_distances(). You can call these after render_and_poll()
@@ -2179,6 +2185,7 @@ export namespace craysim
 
         // The instantaneous velocity arising from the last movement
         sm::vec<float> instantaneous_velocity = {};
+        bool instantaneous_rotation = false;
 
         enum class state : std::uint16_t
         {
