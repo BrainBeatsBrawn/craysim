@@ -305,6 +305,10 @@ export namespace craysim
             }
 
             this->record.init (prog_opts.h5_path, std::ios::out | std::ios::trunc);
+
+            // Default, craysim-friendly scene trans/rotation (your viewpoint)
+            this->setSceneTrans (sm::vec<float,3>{ 0.01f, -3.7f, -99.0f });
+            this->setSceneRotation (sm::quaternion<float>{ 0.93f, 0.16f, -0.32f, -0.056f });
         }
 
         ~visual()
@@ -1528,9 +1532,10 @@ export namespace craysim
 
         std::uint32_t n_collision_distances = 180;
         float collision_distance_max = std::numeric_limits<float>::max();
-        // A vvec of tuples containing the collision distance (float) and model ID (std::int32_t) of
-        // the model we'd hit. If model ID is -1 it's the edge of the landscape. If model ID is -2,
-        // it's the end of the search distance (say we try to collide with anything up to 2 m away)
+        // A vvec of tuples containing the collision distance (float) and model ID (the index into
+        // VisualOwnable::vm for the model, cast to std::int32_t) of the model we'd hit. If model
+        // ID is -1 it's the edge of the landscape. If model ID is -2, it's the end of the search
+        // distance (say we try to collide with anything up to 2 m away)
         sm::vvec<std::tuple<float, std::int32_t>> agent_collision_distances = {};
 
         mplot::VisualModel<glver>* best_agent_body()
@@ -1572,13 +1577,7 @@ export namespace craysim
                     sm::mat<float, 3, 4> obb = mdl->get_viewmatrix_obb();
                     // Do oriented bounding box collision detection
                     if (sm::geometry::obb_collision_detect (my_obb, obb)) {
-                        std::uint32_t mdl_id = sm::crc32 (mdl->name);
-                        if (mdl_id < std::numeric_limits<std::int32_t>::max()) {
-                            rtn = static_cast<std::int32_t>(mdl_id);
-                        } else {
-                            rtn = std::numeric_limits<std::int32_t>::max();
-                        }
-                        return rtn;
+                        return static_cast<std::int32_t>(this->getVisualModelId (mdl));
                     }
 
                 } // else: std::cout << "Skipping " << mdl->name << std::endl;
@@ -1588,11 +1587,15 @@ export namespace craysim
             return rtn;
         }
 
-        // In direction @dirn play forward a 'virtual agent movement' until we hit either the
-        // bounding box of a non-landscape model, or the edge of the landscape. Return a tuple
-        // containing the distance to the collision (and which model it was). If model ID is -1 it's
-        // the edge of the landscape. If model ID is -2, it's the end of the search distance @up_to (say we
-        // try to collide with anything up to 2 m away)
+        /*
+         * In direction @dirn play forward a 'virtual agent movement' until we hit either the
+         * bounding box of a non-landscape model, or the edge of the landscape. Return a tuple
+         * containing the distance to the collision (and which model ID it was, cast to int32_t). If
+         * model ID is -1 it was the edge of the landscape. If model ID is -2, it was the end of the
+         * search distance @up_to (say we try to collide with anything up to 15 m away).
+         *
+         * Note experimentation with std::expected in return type.
+         */
         std::expected <std::tuple<float, std::int32_t>, collision_error> compute_collision_distance (const float dirn, const float up_to = 15.0f)
         {
             //std::cout << __func__ << " called to find collision in (ego) direction " << dirn << std::endl;
@@ -1647,13 +1650,9 @@ export namespace craysim
                     if (id > 0) {
                         // BB says collision occurred
                         rtn = { search_distance, id };
-                        //std::cerr << "BB says collision occurred with id " << id << " at distance " << search_distance << "\n";
                         collided = true;
                     } else {
-                        if (search_distance >= up_to) {
-                            rtn = { search_distance, -2 };
-                            // std::cerr << "search_distance = " << search_distance << " >= up_to = " << up_to << ", so end without collision\n";
-                        }
+                        if (search_distance >= up_to) { rtn = { search_distance, -2 }; }
                     }
 
                 } catch (const std::exception& e) {
@@ -1670,6 +1669,45 @@ export namespace craysim
             this->land->navmesh->ti0 = ti0_sv; // Back to the location of the actual camera (which was never moved)
 
             return rtn;
+        }
+
+        // From agent_collision_distances, get the distance to collision for the angle degrees
+        // (using the best data we have)
+        std::tuple<float, std::int32_t> get_collision_distance (const float degrees)
+        {
+            // Find closest available angle to degrees
+            float rads = sm::mathconst<float>::deg2rad * degrees;
+            sm::algo::zero_to_twopi (rads); // constrain
+            const float ainc = sm::mathconst<float>::two_pi / this->agent_collision_distances.size();
+            const float fidx = rads / ainc;
+            const float fidx_c = std::ceil (fidx);
+            const float fidx_f = std::floor (fidx);
+            std::uint32_t idx = 0;
+            if (fidx_c - fidx < fidx - fidx_f) {
+                idx = static_cast<std::uint32_t>(fidx_c);
+            } else {
+                idx = static_cast<std::uint32_t>(fidx_f);
+            }
+            if (idx >= this->agent_collision_distances.size()) {
+                throw std::runtime_error ("get_collision_distance: determined a bad index?");
+            }
+            return this->agent_collision_distances[idx];
+        }
+
+        std::string get_collision_distance_str (const float degrees)
+        {
+            auto[dist, modelid] = this->get_collision_distance (degrees);
+            std::string mid = {};
+            if (modelid < -2) {
+                mid = "unexpected";
+            } else if (modelid == -2) {
+                mid = "max-search";
+            } else if (modelid == -1) {
+                mid = "land-edge";
+            } else {
+                mid = std::format ("vm {}", modelid);
+            }
+            return std::format("{:.2f} ({})", dist, mid);
         }
 
         // In some number of directions around the circle (say 360 at 1 degree intervals or 72 at 5
@@ -1758,6 +1796,8 @@ export namespace craysim
                 && (this->instantaneous_velocity.length() > 0.0f)
                 /* || rotated */) {
                 this->compute_collision_distances();
+
+                std::cout << "Safe distance in ego forwards: " << this->get_collision_distance_str (0.0f) << std::endl;
             }
 
             std::uint32_t camidx = 0;
