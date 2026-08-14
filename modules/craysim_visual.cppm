@@ -75,6 +75,7 @@ export namespace craysim
         breadcrumbs_api,   // If true, show breadcrumbs for API-commanded movements
         breadcrumbs_walk,  // If true, show breadcrumbs for random-walk movements
         find_collisions,  // If true, then find distances to objects that we might collide with. A kind of simulated lidar.
+        visualize_collisions,  // If true, then show distances to objects that we might collide with.
         save_hdf5,        // If true, then save any output data in HDF5 (active in 'path_from_csv' mode)
         debug_mv,         // Open a debug h5 file (craysim.h5) and run compute_mesh_movement once for debug of NavMesh
         show_fps,         // If true, show the FPS in the fps_label
@@ -1641,8 +1642,12 @@ export namespace craysim
 
                 try {
                     cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
-                    // Show locn of cam_to_scene for this search point:
-                    this->add_collisvis (cam_to_scene.translation());
+
+                    if (this->sim_opts.test (craysim::options::visualize_collisions)) {
+                        // Show locn of cam_to_scene for this search point:
+                        this->add_collisvis (cam_to_scene.translation());
+                    }
+
                     // Now we have moved, update search_distance
                     search_distance += (cam_to_scene.translation() - cam_to_scene_sv.translation()).length();
                     // Having moved, does the linear distance between last location and this location cross a bounding box?
@@ -1752,7 +1757,7 @@ export namespace craysim
                 this->agent_collision_distances.resize (this->n_collision_distances, {});
             }
 
-            this->clear_collisvis();
+            if (this->sim_opts.test (craysim::options::visualize_collisions)) { this->clear_collisvis(); }
 
             for (std::uint32_t i = 0; i < this->n_collision_distances; ++i) {
                 float dirn = (sm::mathconst<float>::two_pi * i) / n_collision_distances;
@@ -1829,8 +1834,9 @@ export namespace craysim
                 /* || rotated */) {
                 this->compute_collision_distances();
 
-                std::cout << "Safe distance in ego forwards: " << this->get_collision_distance_str (0.0f) << std::endl;
-                std::cout << "Closest safe distance: " << this->get_closest_collision_distance_str() << std::endl;
+                // Here's how to access the information computed in compute_collision_distances(). You can call these after render_and_poll()
+                // std::cout << "Safe distance in ego forwards: " << this->get_collision_distance_str (0.0f) << std::endl;
+                // std::cout << "Closest safe distance: " << this->get_closest_collision_distance_str() << std::endl;
             }
 
             std::uint32_t camidx = 0;
