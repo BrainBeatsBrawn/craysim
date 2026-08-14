@@ -282,7 +282,6 @@ export namespace craysim
             this->agent_eyevisual_gamma = _agent_gamma;
             this->setup_eyevisual();
             this->setup_breadcrumbs (1000u); // default 1000 breadcrumbs
-            this->setup_collisvis (10000u); // 10000 allows 180 degree vis
             this->setup_agent_coords (prog_opts.agent_coord_len);
             this->setup_compass_coords (prog_opts.agent_coord_len);
 
@@ -608,13 +607,14 @@ export namespace craysim
 
         void clear_collisvis()
         {
+            if (this->cvisvp == nullptr) { this->setup_collisvis (this->n_collision_distances * 50); }
             this->cv_coords.clear();
             this->cvisvp->set_instance_data (this->cv_coords);
         }
 
         void add_collisvis (const sm::vec<>& _location)
         {
-            if (this->cvisvp == nullptr) { return; }
+            if (this->cvisvp == nullptr) { this->setup_collisvis (this->n_collision_distances * 50); }
             if (this->cv_coords.size() < this->cvisvp->max_instances) {
                 this->cv_coords.push_back (_location);
             } // else do nothing
