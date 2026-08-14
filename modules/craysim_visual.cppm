@@ -607,14 +607,14 @@ export namespace craysim
 
         void clear_collisvis()
         {
-            if (this->cvisvp == nullptr) { this->setup_collisvis (this->n_collision_distances * 50); }
+            if (this->cvisvp == nullptr) { this->setup_collisvis (this->n_collision_distances * 100); }
             this->cv_coords.clear();
             this->cvisvp->set_instance_data (this->cv_coords);
         }
 
         void add_collisvis (const sm::vec<>& _location)
         {
-            if (this->cvisvp == nullptr) { this->setup_collisvis (this->n_collision_distances * 50); }
+            if (this->cvisvp == nullptr) { this->setup_collisvis (this->n_collision_distances * 100); }
             if (this->cv_coords.size() < this->cvisvp->max_instances) {
                 this->cv_coords.push_back (_location);
             } // else do nothing
@@ -1552,6 +1552,8 @@ export namespace craysim
             return _agent;
         }
 
+        static constexpr bool debug_collisions = false;
+
         // Compare Bounding boxes for each model and our agent model
         std::int32_t test_agent_bounding_box_intersections (const sm::mat<float, 4>& agent_body_viewmatrix)
         {
@@ -1567,6 +1569,7 @@ export namespace craysim
             mplot::VisualModel<glver>* mdl = this->get_next_vm_accessor();
             while (mdl) {
                 if (mdl != this->land
+                    && mdl->name != "vegetation_inner_alternative" // hack to work in Seville environment
                     && mdl != isvp // breadcrumbs
                     && mdl != cvisvp // collision visualization
                     && mdl != _agent
@@ -1578,7 +1581,11 @@ export namespace craysim
                     sm::mat<float, 3, 4> obb = mdl->get_viewmatrix_obb();
                     // Do oriented bounding box collision detection
                     if (sm::geometry::obb_collision_detect (my_obb, obb)) {
-                        return static_cast<std::int32_t>(this->getVisualModelId (mdl));
+                        auto model_id = static_cast<std::int32_t>(this->getVisualModelId (mdl));
+                        if constexpr (debug_collisions) {
+                            std::cout << "Collision for model " << mdl->name << " ID " << model_id << std::endl;
+                        }
+                        return model_id;
                     }
 
                 } // else: std::cout << "Skipping " << mdl->name << std::endl;
@@ -1626,7 +1633,6 @@ export namespace craysim
             std::uint32_t ti0_sv = this->land->navmesh->ti0;
 
             bool collided = false;
-            float search_distance = 0.0f;
 
             // Get characteristic movement distance from agent BB
             mplot::VisualModel<glver>* _agent = this->best_agent_body();
@@ -1635,6 +1641,7 @@ export namespace craysim
             sm::vec<float, 3> agent_scale = _agent->getViewMatrix().scaling_vec();
             agent_sz *= agent_scale[0]; // Assume uniform scaling
 
+            float search_distance = agent_sz;
             float up_to_dist = agent_sz * up_to;
 
             // Create a movement wrt our camera forwards direction z.
@@ -1647,11 +1654,6 @@ export namespace craysim
 
                 try {
                     cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
-
-                    if (this->sim_opts.test (craysim::options::visualize_collisions)) {
-                        // Show locn of cam_to_scene for this search point:
-                        this->add_collisvis (cam_to_scene.translation());
-                    }
 
                     // Now we have moved, update search_distance
                     search_distance += (cam_to_scene.translation() - cam_to_scene_sv.translation()).length();
@@ -1672,6 +1674,13 @@ export namespace craysim
                         collided = true;
                     } else {
                         return std::unexpected (collision_error::move_not_possible);
+                    }
+                }
+
+                if (this->sim_opts.test (craysim::options::visualize_collisions)) {
+                    // Show locn of cam_to_scene for this search point:
+                    if (!collided) {
+                        this->add_collisvis (cam_to_scene.translation());
                     }
                 }
             }
@@ -1770,7 +1779,7 @@ export namespace craysim
                 this->agent_collision_distances.resize (this->n_collision_distances, {});
             }
 
-            std::uint32_t up_to = 10;
+            std::uint32_t up_to = 10; // Have space for ~50, but depends on roll/pitch/yaw of camera
 
             if (this->sim_opts.test (craysim::options::visualize_collisions)) {
                 this->clear_collisvis();
