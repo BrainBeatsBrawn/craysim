@@ -442,7 +442,7 @@ export namespace craysim
             auto cvisv = std::make_unique<mplot::InstancedScatterVisual<glver>> (sm::vec<>{});
             cvisv->set_parent (this->get_id());
             cvisv->max_instances = max_cv;
-            cvisv->radiusFixed = 0.1f;
+            cvisv->radiusFixed = 0.004f;
             cvisv->marker_offset = cvisv->radiusFixed;
             cvisv->marker_offset_dirn = sm::vec<>::uy();
             cvisv->name = "collisvis";
@@ -1630,7 +1630,7 @@ export namespace craysim
 
             // Get characteristic movement distance from agent BB
             mplot::VisualModel<glver>* _agent = this->best_agent_body();
-            float agent_sz = _agent->bb.span().mean();
+            float agent_sz = _agent->get_viewmatrix_modelbb().span().mean();
 
             // Create a movement wrt our camera forwards direction z.
             sm::vec<float> mv_camframe = {0, 0, agent_sz};
@@ -1885,6 +1885,9 @@ export namespace craysim
             // Scale size of breadcrumbs based on distance
             float iscl = this->bc_mult * std::log (1.0f + this->bc_mult * this->get_d_to_rotation_centre());
             this->isvp->set_instance_scale (iscl);
+            if (this->cvisvp != nullptr) {
+                this->cvisvp->set_instance_scale (iscl * 1.2f);
+            }
 
             if (this->compass_coords != nullptr) {
                 this->compass_coords->setViewMatrix (this->get_compass_matrix());
