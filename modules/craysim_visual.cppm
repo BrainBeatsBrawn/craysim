@@ -1630,7 +1630,11 @@ export namespace craysim
 
             // Get characteristic movement distance from agent BB
             mplot::VisualModel<glver>* _agent = this->best_agent_body();
-            float agent_sz = _agent->get_viewmatrix_modelbb().span().mean();
+            float agent_sz = _agent->bb.span().mean();
+            // Want to scale agent_sz by the scaling present in get_viewmatrix.
+            sm::vec<float, 3> agent_scale = _agent->getViewMatrix().scaling_vec();
+            agent_sz *= agent_scale[0]; // Assume uniform scaling
+            std::cout << "Agent size: " << agent_sz << " from scaling: " << agent_scale << std::endl;
 
             // Create a movement wrt our camera forwards direction z.
             sm::vec<float> mv_camframe = {0, 0, agent_sz};
