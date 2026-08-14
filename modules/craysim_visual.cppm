@@ -1676,6 +1676,7 @@ export namespace craysim
             return rtn;
         }
 
+        // Formats a tuple containing a distance and a model ID/search end info
         std::string format_collision_distance (const std::tuple<float, std::int32_t>& cd)
         {
             auto[dist, modelid] = cd;
@@ -1692,7 +1693,9 @@ export namespace craysim
             return std::format("{:.2f} ({})", dist, mid);
         }
 
-        // Find the distance , angle (degrees) and model ID to the closest collision
+        // Find the distance, angle (degrees) and model ID to the closest collision between your
+        // agent and a model on your landscape. The values in agent_collision_distances should have
+        // been previously computed with a call to compute_collision_distances()
         std::tuple<float, float, std::int32_t> get_closest_collision_distance()
         {
             // distance, angle, modelid
@@ -1712,6 +1715,10 @@ export namespace craysim
             return rtn;
         }
 
+        // Find the distance, angle (degrees) and model ID to the closest collision between your
+        // agent and a model on your landscape and return as a formatted string. The values in
+        // agent_collision_distances should have been previously computed with a call to
+        // compute_collision_distances()
         std::string get_closest_collision_distance_str()
         {
             auto[dist, angle, modelid] = this->get_closest_collision_distance();
@@ -1720,7 +1727,8 @@ export namespace craysim
         }
 
         // From agent_collision_distances, get the distance to collision for the angle degrees
-        // (using the best data we have)
+        // (using the best data we have). The values in agent_collision_distances should have been
+        // previously computed with a call to compute_collision_distances()
         std::tuple<float, std::int32_t> get_collision_distance (const float degrees)
         {
             // Find closest available angle to degrees
