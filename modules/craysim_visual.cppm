@@ -1448,7 +1448,7 @@ export namespace craysim
                 this->distance_moved += this->instantaneous_velocity.length();
 
                 if (this->sim_opts.test (craysim::options::breadcrumbs_csv)) {
-                    ++this->move_counter;
+                    //++this->move_counter; //
                     if (this->move_counter % breadcrumb_every == 0u) {
                         this->add_breadcrumb (lastcamloc);
                     }
@@ -1782,7 +1782,7 @@ export namespace craysim
         void compute_collision_distances()
         {
             if (this->agent_collision_distances.size() != this->n_collision_distances) {
-                this->agent_collision_distances.resize (this->n_collision_distances, {});
+                this->agent_collision_distances .resize (this->n_collision_distances, {});
             }
 
             std::uint32_t up_to = 10; // Have space for ~50, but depends on roll/pitch/yaw of camera
@@ -1847,6 +1847,8 @@ export namespace craysim
                         // In movie mode, finish as soon as the movie is made
                         this->signal_to_quit();
                     }
+                    this->move_counter++;
+
                 } else if (this->sim_opts.test (craysim::options::path_from_csv)
                            && this->csv_positions.size() <= this->move_counter
                            && this->sim_opts.test (craysim::options::making_movie)) {
@@ -1863,6 +1865,10 @@ export namespace craysim
             } else if (this->vstate.test (craysim::visual<glver>::state::paused) == true
                        && this->sim_opts.any_of ({craysim::options::api_movement, craysim::options::homing_mode})) {
                 this->api_rotate(); // BUT don't inc move counter! This enables rotating while paused
+            } else if (this->vstate.test (craysim::visual<glver>::state::paused) == true
+                       && this->sim_opts.test (craysim::options::path_from_csv)
+                       && this->csv_positions.size() > this->move_counter) {
+                this->csv_playback();
             }
 
             // Having moved, if we need to, we can re-compute the distance to any non-landscape objects that we might collide with.
@@ -2295,43 +2301,63 @@ export namespace craysim
 
             // Process press/repeat key actions (none will work with Ctrl or Shift)
             if (action == mplot::keyaction::press && !(mods & mplot::keymod::shift)) {
-                if (key == mplot::key::w) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::forward);
-                } else if (key == mplot::key::a && !mods) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::left);
-                } else if (key == mplot::key::d) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::right);
-                } else if (key == mplot::key::s) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::backward);
-                } else if (key == mplot::key::p) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::up);
-                } else if (key == mplot::key::l) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::down);
-                } else if (key == mplot::key::up) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_up);
-                } else if (key == mplot::key::down) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_down);
-                } else if (key == mplot::key::left) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_left);
-                } else if (key == mplot::key::right) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_right);
-                } else if (key == mplot::key::comma) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_roll_left);
-                } else if (key == mplot::key::period) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_roll_right);
-                } else if (key == mplot::key::end) {
+
+                if (this->sim_opts.test (craysim::options::path_from_csv)) {
+                    // In CSV playback, keys are fwd/reverse/pause
+                    if (key == mplot::key::up) {
+                        // rewind x10
+                        this->move_counter -= 10;
+                    } else if (key == mplot::key::down) {
+                        // forwards x10
+                        this->move_counter += 10;
+                    } else if (key == mplot::key::left) {
+                        // rewind
+                        this->move_counter -= 1;
+                    } else if (key == mplot::key::right) {
+                        // forwards
+                        this->move_counter += 1;
+                    }
+                } else {
+                    if (key == mplot::key::w) {
+                        this->vstate.reset (state::paused);
+                        this->move_state.set (move_sense::forward);
+                    } else if (key == mplot::key::a && !mods) {
+                        this->vstate.reset (state::paused);
+                        this->move_state.set (move_sense::left);
+                    } else if (key == mplot::key::d) {
+                        this->vstate.reset (state::paused);
+                        this->move_state.set (move_sense::right);
+                    } else if (key == mplot::key::s) {
+                        this->vstate.reset (state::paused);
+                        this->move_state.set (move_sense::backward);
+                    } else if (key == mplot::key::p) {
+                        this->vstate.reset (state::paused);
+                        this->move_state.set (move_sense::up);
+                    } else if (key == mplot::key::l) {
+                        this->vstate.reset (state::paused);
+                        this->move_state.set (move_sense::down);
+                    } else if (key == mplot::key::up) {
+                        this->vstate.reset (state::paused);
+                        this->move_state.set (move_sense::rot_up);
+                    } else if (key == mplot::key::down) {
+                        this->vstate.reset (state::paused);
+                        this->move_state.set (move_sense::rot_down);
+                    } else if (key == mplot::key::left) {
+                        this->vstate.reset (state::paused);
+                        this->move_state.set (move_sense::rot_left);
+                    } else if (key == mplot::key::right) {
+                        this->vstate.reset (state::paused);
+                        this->move_state.set (move_sense::rot_right);
+                    } else if (key == mplot::key::comma) {
+                        this->vstate.reset (state::paused);
+                        this->move_state.set (move_sense::rot_roll_left);
+                    } else if (key == mplot::key::period) {
+                        this->vstate.reset (state::paused);
+                        this->move_state.set (move_sense::rot_roll_right);
+                    }
+                }
+
+                if (key == mplot::key::end) {
                     this->kcmd_speed = this->kcmd_speed * 0.5f;
                     std::cout << "Speed reduced to " << this->kcmd_speed  << "m/s" << std::endl;
                 } else if (key == mplot::key::home) {
@@ -2349,30 +2375,34 @@ export namespace craysim
 
             } else if (action == mplot::keyaction::release && !(mods & mplot::keymod::shift)) {
 
-                if (key == mplot::key::w) {
-                    this->move_state.reset (move_sense::forward);
-                } else if (key == mplot::key::a && !mods) {
-                    this->move_state.reset (move_sense::left);
-                } else if (key == mplot::key::d) {
-                    this->move_state.reset (move_sense::right);
-                } else if (key == mplot::key::s) {
-                    this->move_state.reset (move_sense::backward);
-                } else if (key == mplot::key::p) {
-                    this->move_state.reset (move_sense::up);
-                } else if (key == mplot::key::l) {
-                    this->move_state.reset (move_sense::down);
-                } else if (key == mplot::key::up) {
-                    this->move_state.reset (move_sense::rot_up);
-                } else if (key == mplot::key::down) {
-                    this->move_state.reset (move_sense::rot_down);
-                } else if (key == mplot::key::left) {
-                    this->move_state.reset (move_sense::rot_left);
-                } else if (key == mplot::key::right) {
-                    this->move_state.reset (move_sense::rot_right);
-                } else if (key == mplot::key::comma) {
-                    this->move_state.reset (move_sense::rot_roll_left);
-                } else if (key == mplot::key::period) {
-                    this->move_state.reset (move_sense::rot_roll_right);
+                if (this->sim_opts.test (craysim::options::path_from_csv)) {
+                    // Nothing to do
+                } else {
+                    if (key == mplot::key::w) {
+                        this->move_state.reset (move_sense::forward);
+                    } else if (key == mplot::key::a && !mods) {
+                        this->move_state.reset (move_sense::left);
+                    } else if (key == mplot::key::d) {
+                        this->move_state.reset (move_sense::right);
+                    } else if (key == mplot::key::s) {
+                        this->move_state.reset (move_sense::backward);
+                    } else if (key == mplot::key::p) {
+                        this->move_state.reset (move_sense::up);
+                    } else if (key == mplot::key::l) {
+                        this->move_state.reset (move_sense::down);
+                    } else if (key == mplot::key::up) {
+                        this->move_state.reset (move_sense::rot_up);
+                    } else if (key == mplot::key::down) {
+                        this->move_state.reset (move_sense::rot_down);
+                    } else if (key == mplot::key::left) {
+                        this->move_state.reset (move_sense::rot_left);
+                    } else if (key == mplot::key::right) {
+                        this->move_state.reset (move_sense::rot_right);
+                    } else if (key == mplot::key::comma) {
+                        this->move_state.reset (move_sense::rot_roll_left);
+                    } else if (key == mplot::key::period) {
+                        this->move_state.reset (move_sense::rot_roll_right);
+                    }
                 }
             }
 
