@@ -577,6 +577,7 @@ export namespace craysim
         void clear_breadcrumbs()
         {
             this->move_counter = 0;
+            this->last_breadcrumb_count = 0;
             this->breadcrumb_coords.clear();
             this->breadcrumb_data.clear();
             // Leave bc_clr/bc_alpha/bc_scale for now
@@ -1448,9 +1449,9 @@ export namespace craysim
                 this->distance_moved += this->instantaneous_velocity.length();
 
                 if (this->sim_opts.test (craysim::options::breadcrumbs_csv)) {
-                    //++this->move_counter; //
-                    if (this->move_counter % breadcrumb_every == 0u) {
+                    if ((this->move_counter + 1) % breadcrumb_every == 0u && this->move_counter > this->last_breadcrumb_count) {
                         this->add_breadcrumb (lastcamloc);
+                        this->last_breadcrumb_count = this->move_counter;
                     }
                 }
 
@@ -2121,6 +2122,7 @@ export namespace craysim
         sm::vvec<float> bc_scale;
         // Skip some add_breadcrumb calls with this
         std::uint32_t breadcrumb_every = 1u;
+        std::uint32_t last_breadcrumb_count = 0u;
         // Overall size multiplier for breadcrumbs
         float bc_mult = 1.0f;
 
