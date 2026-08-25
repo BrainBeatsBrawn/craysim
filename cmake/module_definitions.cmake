@@ -15,6 +15,7 @@ macro(setup_module_variables_for_craysim craysim_directory mathplot_directory ma
     ${SM_WINDER_MODULES}
     ${SM_GEOMETRY_MODULES}
     ${SM_RANDOM_WALK_MODULES}
+    ${SM_JC_VORONOI_MODULES}
   )
   list(REMOVE_DUPLICATES CRAYSIM_MATHS_MODULES)
 
@@ -40,7 +41,6 @@ macro(setup_module_variables_for_craysim craysim_directory mathplot_directory ma
     ${mathplot_directory}/mplot/fps/profiler.cppm
     ${mathplot_directory}/mplot/compoundray/interop.cppm
     ${mathplot_directory}/mplot/compoundray/Ommatidium.cppm
-    ${mathplot_directory}/mplot/jcvoronoi/jc_voronoi.cppm
     ${mathplot_directory}/mplot/compoundray/EyeVisual.cppm
     ${mathplot_directory}/mplot/VerticesVisual.cppm
     ${mathplot_directory}/mplot/NormalsVisual.cppm
