@@ -18,7 +18,7 @@ export namespace craysim
     class DoubleHexGridVisual : public mplot::HexGridVisual<T, glver>
     {
     public:
-        DoubleHexGridVisual(const sm::hexgrid* _hg, const sm::vec<float> _offset)
+        DoubleHexGridVisual(const sm::hexgrid<float>* _hg, const sm::vec<float> _offset)
             : mplot::HexGridVisual<T, glver>(_hg, _offset) {}
 
         void reinitColours() // Originally coded as RGB only
