@@ -81,7 +81,7 @@ export namespace craysim
         show_fps,         // If true, show the FPS in the fps_label
         show_movenum,     // If true, show the current movement counter in the fps_label
         move_by_flying,   // If false, then hug the landscape (whether movement is by key, api or whatever); if true, fly
-        eye_is_hex,       // User can tell program that the compound-ray eye is hexagonally laid out. This is a side effect of the compound-ray eye file being specified in the gltf
+        eye_is_hex,       // If true, the glTF encoded a file with .heye suffix (instead of .eye) indicating it is hexagonally arranged.
         can_exit          // If set, program can exit now
     };
 
@@ -146,8 +146,6 @@ export namespace craysim
                 rtn.agent_coord_len = std::stof (argv[++i]);
             } else if (arg == "-m") {
                 rtn.make_movie = true;
-            } else if (arg == "-6") {
-                rtn.opts |= craysim::options::eye_is_hex;
             }
         }
         if (rtn.gltf_path.empty()) {
@@ -344,7 +342,12 @@ export namespace craysim
                 this->efpaths[ci] = getEyeDataPath();
                 if (!this->efpaths[ci].empty()) {
                     my_compound_camera = ci;
-                    std::cout << "my_compound_camera = " << my_compound_camera << std::endl;
+                    std::cout << "my_compound_camera = " << my_compound_camera
+                              << " (" << this->efpaths[ci] << ")" << std::endl;
+                    if (this->efpaths[ci].find (".heye") != std::string::npos) {
+                        // Assume we are using a hexagonally arranged eye
+                        this->sim_opts.set (craysim::options::eye_is_hex);
+                    }
                 }
             }
 
