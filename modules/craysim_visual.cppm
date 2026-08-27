@@ -81,6 +81,7 @@ export namespace craysim
         show_fps,         // If true, show the FPS in the fps_label
         show_movenum,     // If true, show the current movement counter in the fps_label
         move_by_flying,   // If false, then hug the landscape (whether movement is by key, api or whatever); if true, fly
+        eye_is_hex,       // User can tell program that the compound-ray eye is hexagonally laid out. This is a side effect of the compound-ray eye file being specified in the gltf
         can_exit          // If set, program can exit now
     };
 
@@ -145,6 +146,8 @@ export namespace craysim
                 rtn.agent_coord_len = std::stof (argv[++i]);
             } else if (arg == "-m") {
                 rtn.make_movie = true;
+            } else if (arg == "-6") {
+                rtn.opts |= craysim::options::eye_is_hex;
             }
         }
         if (rtn.gltf_path.empty()) {
@@ -394,9 +397,14 @@ export namespace craysim
                     std::cout << "No associated OCES file for a head with this one.\n";
                 } else {
                     std::cout << "Success loading OCES file " << oces_path << "\n";
+                    // Make the hex-equivalent eye
+                    if (this->sim_opts.test(craysim::options::eye_is_hex) == true) {
+                        std::cout << "Set up the hex equivalent of the OCES eye...\n";
+                        this->oces_reader[efp.first].setup_hexeye();
+                    }
                     // Read the head and make a VisualModel
                     constexpr float gam = 2.222222222222222f;
-                    oces_reader[efp.first].head_mesh.single_colour = {std::pow (0.345f, gam), std::pow (0.122f, gam), std::pow (0.082f, gam)};
+                    oces_reader[efp.first].get_eye()->head_mesh.single_colour = {std::pow (0.345f, gam), std::pow (0.122f, gam), std::pow (0.082f, gam)};
                     break;
                 }
             }
@@ -1806,7 +1814,7 @@ export namespace craysim
         void compute_collision_distances()
         {
             if (this->agent_collision_distances.size() != this->n_collision_distances) {
-                this->agent_collision_distances .resize (this->n_collision_distances, {});
+                this->agent_collision_distances.resize (this->n_collision_distances, {});
             }
 
             std::uint32_t up_to = 10; // Have space for ~50, but depends on roll/pitch/yaw of camera
@@ -2022,7 +2030,7 @@ export namespace craysim
 
         mplot::meshgroup* get_head_mesh (const std::uint32_t camidx)
         {
-            return this->oces_reader[camidx].read_success ? reinterpret_cast<mplot::meshgroup*>(&this->oces_reader[camidx].head_mesh) : nullptr;
+            return this->oces_reader[camidx].read_success ? reinterpret_cast<mplot::meshgroup*>(&this->oces_reader[camidx].get_eye()->head_mesh) : nullptr;
         }
 
         // Get the transform matrix defining the pose of the camera/agent. That's stored in agent_coords
@@ -2521,7 +2529,7 @@ export namespace craysim
         }
     };
 
-    // Add a suitable 2D projection to show our ant eye (distributed with OCES) in a flat fiew
+    // Add a suitable 2D projection to show our ant eye (distributed with OCES) in a flat view
     template <int glver>
     void add_ant_eye_spherical_projection (craysim::visual<glver>& v, mplot::compoundray::EyeVisual<glver>* eyevm2, const std::uint32_t camidx)
     {
@@ -2531,7 +2539,11 @@ export namespace craysim
         sm::vec<> centre = { -0.00002f, 0, 0 };  // projection sphere centre
 
         if (v.oces_reader.contains (camidx) && v.oces_reader[camidx].read_success == true) {
-            sz = v.oces_reader[camidx].position.size();
+            sz = v.oces_reader[camidx].get_eye()->position.size(); // NOT necessarily same as compound ray
+                                                                   // eye specfied in glTF. THIS is why we have to have the SAME
+                                                                   // velox-head.gltf as the velox-head.eye
+                                                                   // (would be better to provide eye in oces
+                                                                   // format in single file)
             ps_rad = 0.0002f;
             centre = { -0.00054, -0.00009, -0.00002 };
         }
@@ -2561,8 +2573,8 @@ export namespace craysim
 
         // Second eye of the eye pair (another spherical projection)
         if (v.oces_reader.contains (camidx) && v.oces_reader[camidx].read_success == true) {
-            if (v.oces_reader[camidx].mirrors.empty() == false) {
-                centre = (v.oces_reader[camidx].mirrors[0] * centre).less_one_dim();
+            if (v.oces_reader[camidx].get_eye()->mirrors.empty() == false) {
+                centre = (v.oces_reader[camidx].get_eye()->mirrors[0] * centre).less_one_dim();
                 sm::vec<> twod_shift_left = twod_shift;
                 twod_shift_left[0] *= -1.0f;
                 twod_tr.set_identity();
