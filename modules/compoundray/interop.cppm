@@ -53,7 +53,7 @@ export namespace craysim::compoundray
     // passed to libEyeRenderer's loadGlTFscene
     sutil::Matrix4x4 blender_transform()
     {
-        return mplot::compoundray::mat44_to_Matrix4x4 (mplot::compoundray::blender_transform_mat());
+        return craysim::compoundray::mat44_to_Matrix4x4 (craysim::compoundray::blender_transform_mat());
     }
 
     /*!
