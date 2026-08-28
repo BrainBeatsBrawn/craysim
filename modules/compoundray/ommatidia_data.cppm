@@ -30,8 +30,12 @@ export namespace craysim::compoundray
     template <std::int32_t glver>
     struct ommatidia_data : public mplot::VisualModel<glver>
     {
+        // We require a reinitColours function in derived types
+        virtual void reinitColours() = 0;
         // The colours detected by each ommatidium
         std::vector<std::array<float, 3>>* ommData = nullptr;
+        // If we are instead rendering scalar data, use scalarData
+        std::vector<float>* scalarData = nullptr;
         // The position and orientation of each ommatidium
         std::vector<craysim::compoundray::Ommatidium>* ommatidia = nullptr;
         // An optional head mesh
