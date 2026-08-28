@@ -29,7 +29,7 @@ import sm.hdfdata;
 import sm.algo;
 import sm.geometry;
 import sm.config;
-import sm.crc32;
+import sm.random;
 
 import mplot.tools;
 import mplot.compoundray.interop; // mathplot <--> compoundray interoperability
@@ -1565,6 +1565,18 @@ export namespace craysim
         // Time const for frames.
         double frame_tau = 0.0167;
 
+        sm::mat<float, 4> random_rotation()
+        {
+            auto r = sm::mat<float, 4>::identity();
+            // Add optional jitter/orientation uncertainty here.
+            if (this->rotation_uncertainty_degrees[i_roll] > 0.0f) {
+                // Sample an additional roll to add to cam_to_scene.
+                float extra_roll = this->rotn_rng.get() * sm::mathconst<float>::deg2rad * this->rotation_uncertainty_degrees[i_roll];
+                r.rotate (sm::vec<float>::uz(), extra_roll);
+            }
+            return r;
+        }
+
         enum class collision_error
         {
             land_is_nullptr,
@@ -1916,9 +1928,22 @@ export namespace craysim
                 // std::cout << "Closest safe distance: " << this->get_closest_collision_distance_str() << std::endl;
             }
 
+            auto cam_pre_rand = sm::mat<float, 4>::identity();
+            // If requested, add uncertainty in the pitch/roll/yaw for the image here, in a way that
+            // does not affect the agent's movement.
+            if (this->rotation_uncertainty_degrees.sum() > 0.0f) {
+                sm::mat<float, 4> rr = this->random_rotation();
+                cam_pre_rand = mplot::compoundray::getCameraSpace (scene);
+                this->set_camera_pose (cam_pre_rand * rr); // rotate camera by rr
+            }
+
             std::uint32_t camidx = 0;
             // Call the compound-ray ray casting method to recompute the compound-eye view of the scene
             renderFrame();
+
+            // If necessary, restore camera rotation
+            if (this->rotation_uncertainty_degrees.sum() > 0.0f) { this->set_camera_pose (cam_pre_rand); }
+
             // Access data so that a brain model could be fed
             if (isCompoundEyeActive()) {
                 camidx = scene->getCameraIndex();
@@ -2192,6 +2217,15 @@ export namespace craysim
         std::uint32_t last_ti = std::numeric_limits<std::uint32_t>::max();
         // This is the height above the landscape to place the camera/agent. Set it suitably in your application.
         float hoverheight = 0.01f;
+
+        // We can randomise the pitch, yaw, roll (in that order in this vec) a little after each
+        // movement, restoring the non-random agent orientation each time (to avoid messing up the
+        // movement of the agent)
+        static constexpr std::uint32_t i_pitch = 0;
+        static constexpr std::uint32_t i_yaw = 1;
+        static constexpr std::uint32_t i_roll = 2;
+        sm::vec<float, 3> rotation_uncertainty_degrees = {};
+        sm::rand_normal<float> rotn_rng; // mean 0, SD 1 is fine for this application
 
         // Holds the first csv file name (there may be multiple). Used for found csv saving.
         std::string first_csv = {};
