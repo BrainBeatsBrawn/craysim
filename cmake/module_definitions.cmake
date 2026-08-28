@@ -39,9 +39,9 @@ macro(setup_module_variables_for_craysim craysim_directory mathplot_directory ma
   set(CRAYSIM_MATHPLOT_MODULES
     ${MPLOT_CORE_MODULES}
     ${mathplot_directory}/mplot/fps/profiler.cppm
-    ${mathplot_directory}/mplot/compoundray/interop.cppm
-    ${mathplot_directory}/mplot/compoundray/Ommatidium.cppm
-    ${mathplot_directory}/mplot/compoundray/EyeVisual.cppm
+    ${craysim_directory}/modules/compoundray/interop.cppm
+    ${craysim_directory}/modules/compoundray/Ommatidium.cppm
+    ${craysim_directory}/modules/compoundray/EyeVisual.cppm
     ${mathplot_directory}/mplot/VerticesVisual.cppm
     ${mathplot_directory}/mplot/NormalsVisual.cppm
     ${mathplot_directory}/mplot/InstancedScatterVisual.cppm

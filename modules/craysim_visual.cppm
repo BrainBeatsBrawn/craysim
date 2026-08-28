@@ -32,9 +32,9 @@ import sm.config;
 import sm.random;
 
 import mplot.tools;
-import mplot.compoundray.interop; // mathplot <--> compoundray interoperability
-import mplot.compoundray.ommatidium; // The mplot::Ommatidium structure
-import mplot.compoundray.eyevisual;
+import craysim.compoundray.interop; // mathplot <--> compoundray interoperability
+import craysim.compoundray.ommatidium; // An Ommatidium structure built on sm::vec<>
+import craysim.compoundray.eyevisual;
 import mplot.instancedscattervisual;
 import mplot.normalsvisual;
 import mplot.coordarrows;
@@ -327,9 +327,9 @@ export namespace craysim
             mplot::tools::stripUnixFile (this->basepath);
             std::cout << "glTF dir: " << this->basepath << std::endl;
             loadGlTFscene (this->path.c_str(), (this->sim_opts.test (craysim::options::blender_axes)
-                                                ? mplot::compoundray::blender_transform() : sutil::Matrix4x4::identity()));
+                                                ? craysim::compoundray::blender_transform() : sutil::Matrix4x4::identity()));
             // Get the visual models from the scene
-            mplot::compoundray::scene_to_visualmodels<glver> (scene, this, false); // true for 'make_navmeshes'
+            craysim::compoundray::scene_to_visualmodels<glver> (scene, this, false); // true for 'make_navmeshes'
         }
 
         void setup_camera()
@@ -419,11 +419,11 @@ export namespace craysim
             // We get the initial camera localspace. This also serves to reset the camera pose. This
             // is set in the GLTF file and note that it may be a LEFT HANDED coordinate system! We
             // update this if we have a landscape, and it is updated to the first pose 'on the land'
-            sm::mat<float, 4> ics = mplot::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> ics = craysim::compoundray::getCameraSpace (scene);
             this->initial_camera_space.translate (ics.translation()); // Right handed
 
             // Create an EyeVisual 'eye' in our scene just for camera 0
-            auto eyevm = std::make_unique<mplot::compoundray::EyeVisual<glver>> (sm::vec<>{},
+            auto eyevm = std::make_unique<craysim::compoundray::EyeVisual<glver>> (sm::vec<>{},
                                                                                  &this->ommatidia_datas[0],
                                                                                  this->get_ommatidia_ptr(0),
                                                                                  this->get_head_mesh(0));
@@ -715,7 +715,7 @@ export namespace craysim
 
             std::cout << "Landscape name: " << this->land->name << " was found [" << (land->vpos_size() / 3) << " vertices]\n";
             this->land_to_scene = land->getViewMatrix();
-            sm::mat<float, 4> camspace = mplot::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> camspace = craysim::compoundray::getCameraSpace (scene);
 
             if (this->sim_opts.test (craysim::options::path_from_csv) && !this->csv_positions.empty()) {
                 this->init_path_from_csv();
@@ -747,7 +747,7 @@ export namespace craysim
                 std::cout << "Failed to find the landscape; Camera position unchanged from glTF/CSV\n";
             }
 
-            sm::mat<float, 4> _cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> _cam_to_scene = craysim::compoundray::getCameraSpace (scene);
             std::cout << "Got camera pose matrix from scene:\n" << _cam_to_scene << std::endl;
             sm::vec<float> _lastloc = _cam_to_scene.translation();
 
@@ -770,7 +770,7 @@ export namespace craysim
                     this->init_path_from_csv();
                 }
 
-                sm::mat<float, 4> camspace = mplot::compoundray::getCameraSpace (scene);
+                sm::mat<float, 4> camspace = craysim::compoundray::getCameraSpace (scene);
                 sm::vec<float> camloc_mf = (this->land_to_scene.inverse() * camspace * sm::vec<float>{}).less_one_dim();
                 auto[hp_scene, _ti0] = this->land->navmesh->find_triangle_hit (this->land_to_scene, camloc_mf, this->scene_up * -100.0f);
                 cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight);
@@ -830,7 +830,7 @@ export namespace craysim
         // Has the camera rotated since the last ime step? Returns true if rotation in any plane is greater than the threshold.
         bool camera_has_rotated (float rotation_threshold_rad = 0.01745f) // default threshold of ~1 degree
         {
-            sm::mat<float, 4> curr_cam_to_scene = mplot::compoundray::getCameraSpace(scene);
+            sm::mat<float, 4> curr_cam_to_scene = craysim::compoundray::getCameraSpace(scene);
 
             // If this is the first call, just store and return false
             if (tm1_cam_to_scene[0] == std::numeric_limits<float>::max()) {
@@ -868,7 +868,7 @@ export namespace craysim
         sm::mat<float, 4> get_compass_matrix ()
         {
             // Project camera forward (z-axis) onto the y=0 ground plane to get heading direction
-            sm::mat<float,4> cam_to_scene = mplot::compoundray::getCameraSpace(scene);
+            sm::mat<float,4> cam_to_scene = craysim::compoundray::getCameraSpace(scene);
             // Vector pointing in the camera's forward direction, defined as the z direction in the camera's frame
             sm::vec<float> cam_z = cam_to_scene.col(2).less_one_dim();
             cam_z.renormalize();
@@ -888,7 +888,7 @@ export namespace craysim
         float get_compass_heading_rad() const
         {
             // What's the orientation of cam_to_scene wrt to scene? It's just the rotation of cam_to_scene.
-            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
             // Offset cam_to_scene back to origin
             cam_to_scene.pretranslate (-cam_to_scene.translation());
             // The camera's forwards direction is its z axis
@@ -970,7 +970,7 @@ export namespace craysim
                                         this->api_cam_rotn_axis[1],
                                         this->api_cam_rotn_axis[2]);
 
-            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
 
             for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
             if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
@@ -986,7 +986,7 @@ export namespace craysim
                                         this->api_cam_rotn_axis[2]);
             this->instantaneous_rotation = true;
 
-            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
 
             // move by this->api_cam_mv; along z (for now?)
             sm::vec<float> mv_camframe = this->api_cam_mv;
@@ -1055,7 +1055,7 @@ export namespace craysim
                                         this->api_cam_rotn_axis[2]);
             this->instantaneous_rotation = true;
 
-            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
 
             // move by this->api_cam_mv; along z (for now?)
             sm::vec<float> mv_camframe = this->api_cam_mv;
@@ -1117,7 +1117,7 @@ export namespace craysim
             std::uint32_t camidx = scene->getCameraIndex();
             std::uint32_t camidx_start = camidx;
             do {
-                setCameraPoseMatrix (mplot::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
+                setCameraPoseMatrix (craysim::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
                 nextCamera();
                 camidx = scene->getCameraIndex();
             } while (camidx != camidx_start);
@@ -1134,7 +1134,7 @@ export namespace craysim
 
         void key_move_flying (const float fps)
         {
-            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
             if (this->is_actively_rotating()) {
                 this->instantaneous_rotation = true;
                 // Up-down (pitch) is rotation about local camera frame axis x
@@ -1143,7 +1143,7 @@ export namespace craysim
                 rotateCamerasLocallyAround (this->get_horizontal_rotation_angle(), 0.0f, 1.0f, 0.0f);
                 // Roll
                 rotateCamerasLocallyAround (this->get_roll_rotation_angle(), 0.0f, 0.0f, 1.0f);
-                cam_to_scene = mplot::compoundray::getCameraSpace (scene); // update
+                cam_to_scene = craysim::compoundray::getCameraSpace (scene); // update
             }
             if (this->is_actively_translating()) {
                 // Simpler than key_move_over_landscape
@@ -1173,7 +1173,7 @@ export namespace craysim
                 this->ommatidias[_camidx] = &scene->m_ommVecs[_camidx];
             }
 
-            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
             if (this->is_actively_rotating()) {
                 this->instantaneous_rotation = true;
                 // Up-down (pitch) is rotation about local camera frame axis x
@@ -1182,7 +1182,7 @@ export namespace craysim
                 rotateCamerasLocallyAround (this->get_horizontal_rotation_angle(), 0.0f, 1.0f, 0.0f);
                 // Roll
                 rotateCamerasLocallyAround (this->get_roll_rotation_angle(), 0.0f, 0.0f, 1.0f);
-                cam_to_scene = mplot::compoundray::getCameraSpace (scene); // update
+                cam_to_scene = craysim::compoundray::getCameraSpace (scene); // update
             }
             if (this->is_actively_translating()) {
                 if (this->move_state.test (craysim::visual<glver>::move_sense::up)) {
@@ -1269,7 +1269,7 @@ export namespace craysim
         // Really: perform a 2D random walk in a plane
         void walk_flying()
         {
-            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
 
             // A random walk mode
             if (!this->rrg || this->vstate.test (craysim::visual<glver>::state::walk) == false) { return; }
@@ -1279,7 +1279,7 @@ export namespace craysim
             // rrg.omega is the angular speed rrg.speed is the linear speed
             rotateCamerasLocallyAround (this->rrg->omega, 0.0f, 1.0f, 0.0f);
             this->instantaneous_rotation = true;
-            cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            cam_to_scene = craysim::compoundray::getCameraSpace (scene);
             // ti0, mv_camframe, cam_to_scene to save.
             sm::vec<float> mv_camframe = { 0, 0, this->rrg->speed };
             sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
@@ -1300,7 +1300,7 @@ export namespace craysim
 
         void walk_over_land()
         {
-            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
 
             // A random walk mode
             if (!this->rrg || this->vstate.test (craysim::visual<glver>::state::walk) == false) { return; }
@@ -1310,7 +1310,7 @@ export namespace craysim
             // rrg.omega is the angular speed rrg.speed is the linear speed
             rotateCamerasLocallyAround (this->rrg->omega, 0.0f, 1.0f, 0.0f);
             this->instantaneous_rotation = true;
-            cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            cam_to_scene = craysim::compoundray::getCameraSpace (scene);
             // ti0, mv_camframe, cam_to_scene to save.
             sm::vec<float> mv_camframe = { 0, 0, this->rrg->speed };
             sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
@@ -1370,7 +1370,7 @@ export namespace craysim
         {
             bool rtn = true;
 
-            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
 
             if (this->csv_positions.size() > this->move_counter) {
 
@@ -1415,7 +1415,7 @@ export namespace craysim
                     sm::mat<float, 4> cnl;
                     cnl.translate (cam_nextloc);
                     this->set_camera_pose (cnl);
-                    cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+                    cam_to_scene = craysim::compoundray::getCameraSpace (scene);
                 }
 
                 if (this->sim_opts.test (craysim::options::csv_in_plane) == true) {
@@ -1449,7 +1449,7 @@ export namespace craysim
 
                     } else {
                         // Rather than throwing, could just move on to next in csv?
-                        cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+                        cam_to_scene = craysim::compoundray::getCameraSpace (scene);
                         std::cout << "Omit csv_positions[this->move_counter] = csv_positions[" << this->move_counter << "] = "
                                   << this->csv_positions[this->move_counter] << " (failed to find triangle hit)\n";
                     }
@@ -1666,7 +1666,7 @@ export namespace craysim
             std::tuple<float, std::int32_t> rtn = {};
 
             // Get the current camera space (could happen once in compute_collision_distances)
-            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
             // Compute translations (could happen once in compute_collision_distances)
             sm::vec<float> cam_tran = cam_to_scene.translation();
             sm::mat<float, 4> tr1;
@@ -1933,7 +1933,7 @@ export namespace craysim
             // does not affect the agent's movement.
             if (this->rotation_uncertainty_degrees.sum() > 0.0f) {
                 sm::mat<float, 4> rr = this->random_rotation();
-                cam_pre_rand = mplot::compoundray::getCameraSpace (scene);
+                cam_pre_rand = craysim::compoundray::getCameraSpace (scene);
                 this->set_camera_pose (cam_pre_rand * rr); // rotate camera by rr
             }
 
@@ -2051,9 +2051,9 @@ export namespace craysim
             this->fps_label->setupText (lstr);
         }
 
-        std::vector<mplot::compoundray::Ommatidium>* get_ommatidia_ptr (const std::uint32_t camidx)
+        std::vector<craysim::compoundray::Ommatidium>* get_ommatidia_ptr (const std::uint32_t camidx)
         {
-            return reinterpret_cast<std::vector<mplot::compoundray::Ommatidium>*>(ommatidias[camidx]);
+            return reinterpret_cast<std::vector<craysim::compoundray::Ommatidium>*>(ommatidias[camidx]);
         }
 
         mplot::meshgroup* get_head_mesh (const std::uint32_t camidx)
@@ -2153,9 +2153,9 @@ export namespace craysim
         std::map<std::uint32_t, std::size_t> last_eye_size;
         // An mplot::VisualModel of the compound-ray eye. This is the eye in the scene. Store one
         // pointer-to-a-visualization for each compoundray camera.
-        std::map<std::uint32_t, mplot::compoundray::EyeVisual<glver>*> eyes;
+        std::map<std::uint32_t, craysim::compoundray::EyeVisual<glver>*> eyes;
         // Allows for multiple EyeVisuals for each compoundray camera
-        std::map<std::uint32_t, std::vector<mplot::compoundray::EyeVisual<glver>*>> other_eyes;
+        std::map<std::uint32_t, std::vector<craysim::compoundray::EyeVisual<glver>*>> other_eyes;
 
         // You may have a VisualModel of an 'agent body' to go along with your EyeVisual
         mplot::VisualModel<glver>* agent_body = nullptr;
@@ -2568,7 +2568,7 @@ export namespace craysim
 
     // Add a suitable 2D projection to show our ant eye (distributed with OCES) in a flat view
     template <int glver>
-    void add_ant_eye_spherical_projection (craysim::visual<glver>& v, mplot::compoundray::EyeVisual<glver>* eyevm2, const std::uint32_t camidx)
+    void add_ant_eye_spherical_projection (craysim::visual<glver>& v, craysim::compoundray::EyeVisual<glver>* eyevm2, const std::uint32_t camidx)
     {
         // First eye of eye pair (one spherical projection)
         std::uint32_t sz = 1024;
@@ -2591,10 +2591,10 @@ export namespace craysim
         sm::vec<> twod_offset2 = { -0.0004f, 0.0007f, 0.0f }; // post scale/rotate translation
         sm::vec<> twod_shift = {0,0.0006,0};
         float rotn = -sm::mathconst<float>::pi_over_8;
-        auto ptype = mplot::compoundray::EyeVisual<glver>::projection_type::mercator;
+        auto ptype = craysim::compoundray::EyeVisual<glver>::projection_type::mercator;
         if (v.oces_reader.contains (camidx) && v.oces_reader[camidx].read_success == true) {
             std::cout << "Read from oces file!!\n";
-            ptype = mplot::compoundray::EyeVisual<glver>::projection_type::equirectangular;
+            ptype = craysim::compoundray::EyeVisual<glver>::projection_type::equirectangular;
             twod_tr.translate (twod_shift);
         } else {
             twod_tr.translate (twod_offset2);
