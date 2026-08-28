@@ -934,7 +934,6 @@ export namespace craysim
             std::uint32_t ti0_sv = this->land->navmesh->ti0;
             try {
                 cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
-
                 // Now we have moved, can compute instantaneous velocity
                 this->instantaneous_velocity = cam_to_scene.translation() - cam_to_scene_sv.translation();
                 this->distance_moved += this->instantaneous_velocity.length();
@@ -1478,7 +1477,7 @@ export namespace craysim
 
         sm::mat<float, 4> random_rotation()
         {
-            sm::mat<float, 4> r; // identity matrix
+            auto r = sm::mat<float, 4>::identity();
             // Add optional jitter/orientation uncertainty here.
             if (this->rotation_uncertainty_degrees[i_roll] > 0.0f) {
                 // Sample an additional roll to add to cam_to_scene.
@@ -1550,19 +1549,21 @@ export namespace craysim
                 this->api_rotate(); // BUT don't inc move counter! This enables rotating while paused
             }
 
-            // Add optional uncertainty in the pitch/roll/yaw for the image here, in a way that does not affect the agent's movement.
-            sm::mat<float, 4> rr = this->random_rotation();
-
-            // rotate camera by rr
-            sm::mat<float, 4> cam_pre_rand = mplot::compoundray::getCameraSpace (scene);
-            this->set_camera_pose (cam_pre_rand * rr);
+            auto cam_pre_rand = sm::mat<float, 4>::identity();
+            // If requested, add uncertainty in the pitch/roll/yaw for the image here, in a way that
+            // does not affect the agent's movement.
+            if (this->rotation_uncertainty_degrees.sum() > 0.0f) {
+                sm::mat<float, 4> rr = this->random_rotation();
+                cam_pre_rand = mplot::compoundray::getCameraSpace (scene);
+                this->set_camera_pose (cam_pre_rand * rr); // rotate camera by rr
+            }
 
             std::uint32_t camidx = 0;
             // Call the compound-ray ray casting method to recompute the compound-eye view of the scene
             renderFrame();
 
-            // Restore camera rotation
-            this->set_camera_pose (cam_pre_rand);
+            // If necessary, restore camera rotation
+            if (this->rotation_uncertainty_degrees.sum() > 0.0f) { this->set_camera_pose (cam_pre_rand); }
 
             // Access data so that a brain model could be fed
             if (isCompoundEyeActive()) {
@@ -1821,10 +1822,9 @@ export namespace craysim
         // This is the height above the landscape to place the camera/agent. Set it suitably in your application.
         float hoverheight = 0.01f;
 
-        // Do we randomise the pitch, yaw, roll (in that order in this vec) a little with each
-        // movement? Can be applied in csv_playback or in any other movement function. How to make
-        // uncertain? Could sample from Gaussian to add uncertainty? In that case this is the
-        // Gaussian's sigma, in degrees.
+        // We can randomise the pitch, yaw, roll (in that order in this vec) a little after each
+        // movement, restoring the non-random agent orientation each time (to avoid messing up the
+        // movement of the agent)
         static constexpr std::uint32_t i_pitch = 0;
         static constexpr std::uint32_t i_yaw = 1;
         static constexpr std::uint32_t i_roll = 2;
