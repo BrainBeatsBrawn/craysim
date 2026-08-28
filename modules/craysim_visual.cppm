@@ -10,6 +10,8 @@ module;
 #include <cmath>
 #include <limits>
 #include <map>
+#include <tuple>
+#include <expected>
 
 #include <MulticamScene.h>
 #include <libEyeRenderer.h> // getCurrentEyeSamplesPerOmmatidium
@@ -72,11 +74,14 @@ export namespace craysim
         breadcrumbs_keymv, // If true, show breadcrumbs for key-commanded movements
         breadcrumbs_api,   // If true, show breadcrumbs for API-commanded movements
         breadcrumbs_walk,  // If true, show breadcrumbs for random-walk movements
+        find_collisions,  // If true, then find distances to objects that we might collide with. A kind of simulated lidar.
+        visualize_collisions,  // If true, then show distances to objects that we might collide with.
         save_hdf5,        // If true, then save any output data in HDF5 (active in 'path_from_csv' mode)
         debug_mv,         // Open a debug h5 file (craysim.h5) and run compute_mesh_movement once for debug of NavMesh
         show_fps,         // If true, show the FPS in the fps_label
         show_movenum,     // If true, show the current movement counter in the fps_label
         move_by_flying,   // If false, then hug the landscape (whether movement is by key, api or whatever); if true, fly
+        eye_is_hex,       // If true, the glTF encoded a file with .heye suffix (instead of .eye) indicating it is hexagonally arranged.
         can_exit          // If set, program can exit now
     };
 
@@ -301,6 +306,10 @@ export namespace craysim
             }
 
             this->record.init (prog_opts.h5_path, std::ios::out | std::ios::trunc);
+
+            // Default, craysim-friendly scene trans/rotation (your viewpoint)
+            this->setSceneTrans (sm::vec<float,3>{ 0.01f, -3.7f, -99.0f });
+            this->setSceneRotation (sm::quaternion<float>{ 0.93f, 0.16f, -0.32f, -0.056f });
         }
 
         ~visual()
@@ -333,7 +342,12 @@ export namespace craysim
                 this->efpaths[ci] = getEyeDataPath();
                 if (!this->efpaths[ci].empty()) {
                     my_compound_camera = ci;
-                    std::cout << "my_compound_camera = " << my_compound_camera << std::endl;
+                    std::cout << "my_compound_camera = " << my_compound_camera
+                              << " (" << this->efpaths[ci] << ")" << std::endl;
+                    if (this->efpaths[ci].find (".heye") != std::string::npos) {
+                        // Assume we are using a hexagonally arranged eye
+                        this->sim_opts.set (craysim::options::eye_is_hex);
+                    }
                 }
             }
 
@@ -386,9 +400,14 @@ export namespace craysim
                     std::cout << "No associated OCES file for a head with this one.\n";
                 } else {
                     std::cout << "Success loading OCES file " << oces_path << "\n";
+                    // Make the hex-equivalent eye
+                    if (this->sim_opts.test(craysim::options::eye_is_hex) == true) {
+                        std::cout << "Set up the hex equivalent of the OCES eye...\n";
+                        this->oces_reader[efp.first].setup_hexeye();
+                    }
                     // Read the head and make a VisualModel
                     constexpr float gam = 2.222222222222222f;
-                    oces_reader[efp.first].head_mesh.single_colour = {std::pow (0.345f, gam), std::pow (0.122f, gam), std::pow (0.082f, gam)};
+                    oces_reader[efp.first].get_eye()->head_mesh.single_colour = {std::pow (0.345f, gam), std::pow (0.122f, gam), std::pow (0.082f, gam)};
                     break;
                 }
             }
@@ -418,6 +437,30 @@ export namespace craysim
             this->setFollowedVM (this->eyes[0]);
         }
 
+        // Collision visualization, to debug collision detection
+        void setup_collisvis (std::uint64_t max_cv)
+        {
+            if (this->cvisvp != nullptr) {
+                // check max_bc same as max_instances
+                if (max_cv == cvisvp->max_instances) {
+                    // Nothing to do
+                    return;
+                }
+                // Remove existing
+                this->removeVisualModel (this->cvisvp);
+                this->cvisvp = nullptr;
+            }
+            auto cvisv = std::make_unique<mplot::InstancedScatterVisual<glver>> (sm::vec<>{});
+            cvisv->set_parent (this->get_id());
+            cvisv->max_instances = max_cv;
+            cvisv->radiusFixed = 0.004f;
+            cvisv->marker_offset = cvisv->radiusFixed;
+            cvisv->marker_offset_dirn = sm::vec<>::uy();
+            cvisv->name = "collisvis";
+            cvisv->finalize();
+            this->cvisvp = this->addVisualModel (cvisv);
+        }
+
         // Breadcrumb trail for max_bc breadcrumbs. Called at start of program, can be re-called
         void setup_breadcrumbs (std::uint64_t max_bc)
         {
@@ -443,6 +486,7 @@ export namespace craysim
             isv->radiusFixed = 0.004f;
             isv->marker_offset = isv->radiusFixed;
             isv->marker_offset_dirn = sm::vec<>::uy();
+            isv->name = "breadcrumbs";
             isv->finalize();
             this->isvp = this->addVisualModel (isv);
         }
@@ -457,7 +501,7 @@ export namespace craysim
             antca->thickness = 0.6f;
             antca->finalize();
             this->agent_coords = this->addVisualModel (antca);
-            this->agent_coords->name = "agent";
+            this->agent_coords->name = "agent_coords";
             this->agent_coords->setViewMatrix (this->initial_camera_space);
         }
 
@@ -471,7 +515,7 @@ export namespace craysim
             compass_coords_up->thickness = 0.3f;
             compass_coords_up->finalize();
             this->compass_coords = this->addVisualModel (compass_coords_up);
-            this->compass_coords->name = "Compass";
+            this->compass_coords->name = "compass_coords";
             this->compass_coords->setViewMatrix (this->get_compass_matrix());
         }
 
@@ -544,6 +588,8 @@ export namespace craysim
         void clear_breadcrumbs()
         {
             this->move_counter = 0;
+            this->target_move_counter = 0;
+            this->last_breadcrumb_count = 0;
             this->breadcrumb_coords.clear();
             this->breadcrumb_data.clear();
             // Leave bc_clr/bc_alpha/bc_scale for now
@@ -570,6 +616,22 @@ export namespace craysim
             } else {
                 this->isvp->set_instance_data (this->breadcrumb_coords, this->bc_clr, this->bc_alpha, this->bc_scale);
             }
+        }
+
+        void clear_collisvis()
+        {
+            if (this->cvisvp == nullptr) { this->setup_collisvis (this->n_collision_distances * 100); }
+            this->cv_coords.clear();
+            this->cvisvp->set_instance_data (this->cv_coords);
+        }
+
+        void add_collisvis (const sm::vec<>& _location)
+        {
+            if (this->cvisvp == nullptr) { this->setup_collisvis (this->n_collision_distances * 100); }
+            if (this->cv_coords.size() < this->cvisvp->max_instances) {
+                this->cv_coords.push_back (_location);
+            } // else do nothing
+            this->cvisvp->set_instance_data (this->cv_coords, this->cv_clr, this->cv_alpha, this->cv_scale);
         }
 
         // Get access to the landscape VisualModel by searching for a selection of model names
@@ -922,6 +984,7 @@ export namespace craysim
                                         this->api_cam_rotn_axis[0],
                                         this->api_cam_rotn_axis[1],
                                         this->api_cam_rotn_axis[2]);
+            this->instantaneous_rotation = true;
 
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
 
@@ -990,6 +1053,7 @@ export namespace craysim
                                         this->api_cam_rotn_axis[0],
                                         this->api_cam_rotn_axis[1],
                                         this->api_cam_rotn_axis[2]);
+            this->instantaneous_rotation = true;
 
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
 
@@ -1072,6 +1136,7 @@ export namespace craysim
         {
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
             if (this->is_actively_rotating()) {
+                this->instantaneous_rotation = true;
                 // Up-down (pitch) is rotation about local camera frame axis x
                 rotateCamerasLocallyAround (this->get_vertical_rotation_angle(), 1.0f, 0.0f, 0.0f);
                 // Left-and-right (yaw) is rotation about local camera frame axis y
@@ -1110,6 +1175,7 @@ export namespace craysim
 
             sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
             if (this->is_actively_rotating()) {
+                this->instantaneous_rotation = true;
                 // Up-down (pitch) is rotation about local camera frame axis x
                 rotateCamerasLocallyAround (this->get_vertical_rotation_angle(), 1.0f, 0.0f, 0.0f);
                 // Left-and-right (yaw) is rotation about local camera frame axis y
@@ -1212,6 +1278,7 @@ export namespace craysim
             this->rrg->step();
             // rrg.omega is the angular speed rrg.speed is the linear speed
             rotateCamerasLocallyAround (this->rrg->omega, 0.0f, 1.0f, 0.0f);
+            this->instantaneous_rotation = true;
             cam_to_scene = mplot::compoundray::getCameraSpace (scene);
             // ti0, mv_camframe, cam_to_scene to save.
             sm::vec<float> mv_camframe = { 0, 0, this->rrg->speed };
@@ -1242,6 +1309,7 @@ export namespace craysim
             this->rrg->step();
             // rrg.omega is the angular speed rrg.speed is the linear speed
             rotateCamerasLocallyAround (this->rrg->omega, 0.0f, 1.0f, 0.0f);
+            this->instantaneous_rotation = true;
             cam_to_scene = mplot::compoundray::getCameraSpace (scene);
             // ti0, mv_camframe, cam_to_scene to save.
             sm::vec<float> mv_camframe = { 0, 0, this->rrg->speed };
@@ -1298,7 +1366,7 @@ export namespace craysim
             this->agent_coords->setViewMatrix (cam_to_scene);
         }
 
-        bool csv_playback()
+        bool csv_playback_one (bool allow_add_breadcrumb = false)
         {
             bool rtn = true;
 
@@ -1392,10 +1460,10 @@ export namespace craysim
                 this->instantaneous_velocity = cam_to_scene.translation() - lastcamloc;
                 this->distance_moved += this->instantaneous_velocity.length();
 
-                if (this->sim_opts.test (craysim::options::breadcrumbs_csv)) {
-                    ++this->move_counter;
-                    if (this->move_counter % breadcrumb_every == 0u) {
+                if (allow_add_breadcrumb && this->sim_opts.test (craysim::options::breadcrumbs_csv)) {
+                    if ((this->move_counter + 1) % breadcrumb_every == 0u && this->move_counter > this->last_breadcrumb_count) {
                         this->add_breadcrumb (lastcamloc);
+                        this->last_breadcrumb_count = this->move_counter;
                     }
                 }
 
@@ -1414,6 +1482,28 @@ export namespace craysim
             if ((this->move_counter - 1) == 1) {
                 std::cout << "Update initial vm last locn\n";
                 this->setFollowedVM (this->eyes[0]);
+            }
+
+            return rtn;
+        }
+
+        bool csv_playback()
+        {
+            bool rtn = true;
+
+            if (target_move_counter < this->move_counter) {
+                // Go straight there, no breadcrumbs
+                this->move_counter = target_move_counter;
+                csv_playback_one (false);
+                return rtn;
+            }
+
+            while (this->move_counter <= target_move_counter) {
+                if (csv_playback_one (true) == false) {
+                    rtn = false;
+                    break;
+                }
+                this->move_counter++;
             }
 
             return rtn;
@@ -1487,6 +1577,278 @@ export namespace craysim
             return r;
         }
 
+        enum class collision_error
+        {
+            land_is_nullptr,
+            navmesh_is_nullptr,
+            move_not_possible
+        };
+
+        std::uint32_t n_collision_distances = 18;
+        float collision_distance_max = std::numeric_limits<float>::max();
+        // A vvec of tuples containing the collision distance (float) and model ID (the index into
+        // VisualOwnable::vm for the model, cast to std::int32_t) of the model we'd hit. If model
+        // ID is -1 it's the edge of the landscape. If model ID is -2, it's the end of the search
+        // distance (say we try to collide with anything up to 2 m away)
+        sm::vvec<std::tuple<float, std::int32_t>> agent_collision_distances = {};
+
+        mplot::VisualModel<glver>* best_agent_body()
+        {
+            mplot::VisualModel<glver>* _agent = nullptr;
+            if (this->agent_body != nullptr) {
+                // We have an actual agent body to use
+                _agent = this->agent_body;
+            } else {
+                // Fall back to using first EyeVisual as the agent
+                _agent = static_cast<mplot::VisualModel<glver>*>(eyes[0]);
+            }
+            return _agent;
+        }
+
+        static constexpr bool debug_collisions = false;
+
+        // Compare Bounding boxes for each model and our agent model
+        std::int32_t test_agent_bounding_box_intersections (const sm::mat<float, 4>& agent_body_viewmatrix)
+        {
+            // std::cout << __func__ << " called for agent viewmatrix\n" << agent_body_viewmatrix << std::endl;
+
+            std::int32_t rtn = -4;
+            mplot::VisualModel<glver>* _agent = this->best_agent_body();
+
+            // Oriented bounding box around virtual agent
+            sm::mat<float, 3, 4> my_obb =  _agent->get_viewmatrix_obb (agent_body_viewmatrix);
+
+            this->init_vm_accessor();
+            mplot::VisualModel<glver>* mdl = this->get_next_vm_accessor();
+            while (mdl) {
+                if (mdl != this->land
+                    && mdl->name != "vegetation_inner_alternative" // hack to work in Seville environment
+                    && mdl != isvp // breadcrumbs
+                    && mdl != cvisvp // collision visualization
+                    && mdl != _agent
+                    && mdl != this->agent_coords
+                    && mdl != this->compass_coords) {
+
+                    // Get the model's oriented bounding box (the compute in here may be
+                    // repeated many times and is acandidate for optimization)
+                    sm::mat<float, 3, 4> obb = mdl->get_viewmatrix_obb();
+                    // Do oriented bounding box collision detection
+                    if (sm::geometry::obb_collision_detect (my_obb, obb)) {
+                        auto model_id = static_cast<std::int32_t>(this->getVisualModelId (mdl));
+                        if constexpr (debug_collisions) {
+                            std::cout << "Collision for model " << mdl->name << " ID " << model_id << std::endl;
+                        }
+                        return model_id;
+                    }
+
+                } // else: std::cout << "Skipping " << mdl->name << std::endl;
+                mdl = this->get_next_vm_accessor();
+            }
+
+            return rtn;
+        }
+
+        /*
+         * In direction @dirn play forward a 'virtual agent movement' until we hit either the
+         * bounding box of a non-landscape model, or the edge of the landscape. Return a tuple
+         * containing the distance to the collision (and which model ID it was, cast to int32_t). If
+         * model ID is -1 it was the edge of the landscape. If model ID is -2, it was the end of the
+         * search distance up @up_to agent sizes/bodylengths
+         *
+         * Note experimentation with std::expected in return type.
+         */
+        std::expected <std::tuple<float, std::int32_t>, collision_error> compute_collision_distance (const float dirn, const std::uint32_t up_to)
+        {
+            //std::cout << __func__ << " called to find collision in (ego) direction " << dirn << std::endl;
+            if (this->land == nullptr) { return std::unexpected (collision_error::land_is_nullptr); }
+            if (this->land->navmesh == nullptr) { return std::unexpected (collision_error::navmesh_is_nullptr); }
+
+            std::tuple<float, std::int32_t> rtn = {};
+
+            // Get the current camera space (could happen once in compute_collision_distances)
+            sm::mat<float, 4> cam_to_scene = mplot::compoundray::getCameraSpace (scene);
+            // Compute translations (could happen once in compute_collision_distances)
+            sm::vec<float> cam_tran = cam_to_scene.translation();
+            sm::mat<float, 4> tr1;
+            tr1.translate (cam_tran);
+            sm::mat<float, 4> tr2;
+            tr2.translate (-cam_tran);
+            // In the camera's frame, y is up (could happen once in compute_collision_distances)
+            sm::vec<float> cam_y = ((tr2 * cam_to_scene) * sm::vec<float>::uy()).less_one_dim();
+
+            // Set the angle of the camera space (must occur in this function)
+            sm::mat<float, 4> rotn (sm::quaternion<float>(cam_y, dirn));
+
+            // Rotate the virtual agent camera to our chosen direction
+            cam_to_scene = tr1 * rotn * tr2 * cam_to_scene;
+
+            // By computing mesh movement, we may change the navmesh's ti0, so we will need to reset it at the end
+            std::uint32_t ti0_sv = this->land->navmesh->ti0;
+
+            bool collided = false;
+
+            // Get characteristic movement distance from agent BB
+            mplot::VisualModel<glver>* _agent = this->best_agent_body();
+            float agent_sz = _agent->bb.span().mean();
+            // Want to scale agent_sz by the scaling present in get_viewmatrix.
+            sm::vec<float, 3> agent_scale = _agent->getViewMatrix().scaling_vec();
+            agent_sz *= agent_scale[0]; // Assume uniform scaling
+
+            float search_distance = agent_sz;
+            float up_to_dist = agent_sz * up_to;
+
+            // Create a movement wrt our camera forwards direction z.
+            sm::vec<float> mv_camframe = {0, 0, agent_sz};
+
+            while (!collided && search_distance < up_to_dist) {
+
+                // Save a copy of the camera space
+                sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
+
+                try {
+                    cam_to_scene = this->land->navmesh->compute_mesh_movement (mv_camframe, cam_to_scene, this->land_to_scene, this->hoverheight);
+
+                    // Now we have moved, update search_distance
+                    search_distance += (cam_to_scene.translation() - cam_to_scene_sv.translation()).length();
+                    // Having moved, does the linear distance between last location and this location cross a bounding box?
+                    std::int32_t id = this->test_agent_bounding_box_intersections (cam_to_scene);
+                    if (id > 0) {
+                        // BB says collision occurred
+                        rtn = { search_distance, id };
+                        collided = true;
+                    } else {
+                        if (search_distance >= up_to_dist) { rtn = { search_distance, -2 }; }
+                    }
+
+                } catch (const std::exception& e) {
+                    std::string msg (e.what());
+                    if (msg.find ("off-edge:") == 0) {
+                        rtn = { search_distance, -1 }; // Went off edge, that's the collision.
+                        collided = true;
+                    } else {
+                        return std::unexpected (collision_error::move_not_possible);
+                    }
+                }
+
+                if (this->sim_opts.test (craysim::options::visualize_collisions)) {
+                    // Show locn of cam_to_scene for this search point:
+                    if (!collided) {
+                        this->add_collisvis (cam_to_scene.translation());
+                    }
+                }
+            }
+
+            this->land->navmesh->ti0 = ti0_sv; // Back to the location of the actual camera (which was never moved)
+
+            return rtn;
+        }
+
+        // Formats a tuple containing a distance and a model ID/search end info
+        std::string format_collision_distance (const std::tuple<float, std::int32_t>& cd)
+        {
+            auto[dist, modelid] = cd;
+            std::string mid = {};
+            if (modelid < -2) {
+                mid = "unexpected";
+            } else if (modelid == -2) {
+                mid = "max-search";
+            } else if (modelid == -1) {
+                mid = "land-edge";
+            } else {
+                mid = std::format ("vm {}", modelid);
+            }
+            return std::format("{:.2f} ({})", dist, mid);
+        }
+
+        // Find the distance, angle (degrees) and model ID to the closest collision between your
+        // agent and a model on your landscape. The values in agent_collision_distances should have
+        // been previously computed with a call to compute_collision_distances()
+        std::tuple<float, float, std::int32_t> get_closest_collision_distance()
+        {
+            // distance, angle, modelid
+            std::tuple<float, float, std::int32_t> rtn = {};
+
+            const float ainc = 360.0f / this->agent_collision_distances.size();
+            float angle = 0.0f;
+            float closest = std::numeric_limits<float>::max();
+            for (std::uint32_t i = 0; i < this->agent_collision_distances.size(); ++i) {
+                auto[dist, modelid] = this->agent_collision_distances[i];
+                if (dist < closest) {
+                    rtn = {dist, angle, modelid};
+                    closest = dist;
+                }
+                angle += ainc;
+            }
+            return rtn;
+        }
+
+        // Find the distance, angle (degrees) and model ID to the closest collision between your
+        // agent and a model on your landscape and return as a formatted string. The values in
+        // agent_collision_distances should have been previously computed with a call to
+        // compute_collision_distances()
+        std::string get_closest_collision_distance_str()
+        {
+            auto[dist, angle, modelid] = this->get_closest_collision_distance();
+            std::tuple<float, std::int32_t> cd = { dist, modelid };
+            return std::format ("Bearing {} collides in {}", angle, this->format_collision_distance (cd));
+        }
+
+        // From agent_collision_distances, get the distance to collision for the angle degrees
+        // (using the best data we have). The values in agent_collision_distances should have been
+        // previously computed with a call to compute_collision_distances()
+        std::tuple<float, std::int32_t> get_collision_distance (const float degrees)
+        {
+            // Find closest available angle to degrees
+            float rads = sm::mathconst<float>::deg2rad * degrees;
+            sm::algo::zero_to_twopi (rads); // constrain
+            const float ainc = sm::mathconst<float>::two_pi / this->agent_collision_distances.size();
+            const float fidx = rads / ainc;
+            const float fidx_c = std::ceil (fidx);
+            const float fidx_f = std::floor (fidx);
+            std::uint32_t idx = 0;
+            if (fidx_c - fidx < fidx - fidx_f) {
+                idx = static_cast<std::uint32_t>(fidx_c);
+            } else {
+                idx = static_cast<std::uint32_t>(fidx_f);
+            }
+            if (idx >= this->agent_collision_distances.size()) {
+                throw std::runtime_error ("get_collision_distance: determined a bad index?");
+            }
+            return this->agent_collision_distances[idx];
+        }
+
+        std::string get_collision_distance_str (const float degrees)
+        {
+            return this->format_collision_distance (this->get_collision_distance (degrees));
+        }
+
+        // In some number of directions around the circle (say 360 at 1 degree intervals or 72 at 5
+        // degree intervals) play forward a 'virtual agent movement' until we hit either the
+        // bounding box of a non-landscape model, or the edge of the landscape. Record the distance
+        // to the collision (and which model it was)
+        void compute_collision_distances()
+        {
+            if (this->agent_collision_distances.size() != this->n_collision_distances) {
+                this->agent_collision_distances.resize (this->n_collision_distances, {});
+            }
+
+            std::uint32_t up_to = 10; // Have space for ~50, but depends on roll/pitch/yaw of camera
+
+            if (this->sim_opts.test (craysim::options::visualize_collisions)) {
+                this->clear_collisvis();
+                // Check we have enough vizualization space
+                if (up_to * this->n_collision_distances > this->cvisvp->max_instances) {
+                    std::cout << "Not enough space, set up_to lower\n";
+                }
+            }
+
+            for (std::uint32_t i = 0; i < this->n_collision_distances; ++i) {
+                float dirn = (sm::mathconst<float>::two_pi * i) / n_collision_distances;
+                auto res = this->compute_collision_distance (dirn, up_to);
+                if (res) { this->agent_collision_distances[i] = res.value(); }
+            }
+        }
+
         // Call this from your main loop. Returns true if slow windows were processed
         bool render_and_poll ()
         {
@@ -1512,6 +1874,7 @@ export namespace craysim
             this->setContext(); // right now key move over land needs main window's context
 
             this->instantaneous_velocity = {}; // velocity computed per render cycle
+            this->instantaneous_rotation = false;
 
             this->agent_coords->setHide (!this->vstate.test(craysim::visual<glver>::state::show_camframe));
             if (this->compass_coords != nullptr) {
@@ -1531,6 +1894,8 @@ export namespace craysim
                         // In movie mode, finish as soon as the movie is made
                         this->signal_to_quit();
                     }
+                    this->target_move_counter++;
+
                 } else if (this->sim_opts.test (craysim::options::path_from_csv)
                            && this->csv_positions.size() <= this->move_counter
                            && this->sim_opts.test (craysim::options::making_movie)) {
@@ -1547,6 +1912,20 @@ export namespace craysim
             } else if (this->vstate.test (craysim::visual<glver>::state::paused) == true
                        && this->sim_opts.any_of ({craysim::options::api_movement, craysim::options::homing_mode})) {
                 this->api_rotate(); // BUT don't inc move counter! This enables rotating while paused
+            } else if (this->vstate.test (craysim::visual<glver>::state::paused) == true
+                       && this->sim_opts.test (craysim::options::path_from_csv)
+                       && this->csv_positions.size() > this->move_counter) {
+                this->csv_playback();
+            }
+
+            // Having moved, if we need to, we can re-compute the distance to any non-landscape objects that we might collide with.
+            if (this->sim_opts.test (craysim::options::find_collisions)
+                && (this->instantaneous_velocity.length() > 0.0f || this->instantaneous_rotation == true)) {
+                this->compute_collision_distances();
+
+                // Here's how to access the information computed in compute_collision_distances(). You can call these after render_and_poll()
+                // std::cout << "Safe distance in ego forwards: " << this->get_collision_distance_str (0.0f) << std::endl;
+                // std::cout << "Closest safe distance: " << this->get_closest_collision_distance_str() << std::endl;
             }
 
             auto cam_pre_rand = sm::mat<float, 4>::identity();
@@ -1600,6 +1979,9 @@ export namespace craysim
             // Scale size of breadcrumbs based on distance
             float iscl = this->bc_mult * std::log (1.0f + this->bc_mult * this->get_d_to_rotation_centre());
             this->isvp->set_instance_scale (iscl);
+            if (this->cvisvp != nullptr) {
+                this->cvisvp->set_instance_scale (iscl * 1.2f);
+            }
 
             if (this->compass_coords != nullptr) {
                 this->compass_coords->setViewMatrix (this->get_compass_matrix());
@@ -1676,7 +2058,7 @@ export namespace craysim
 
         mplot::meshgroup* get_head_mesh (const std::uint32_t camidx)
         {
-            return this->oces_reader[camidx].read_success ? reinterpret_cast<mplot::meshgroup*>(&this->oces_reader[camidx].head_mesh) : nullptr;
+            return this->oces_reader[camidx].read_success ? reinterpret_cast<mplot::meshgroup*>(&this->oces_reader[camidx].get_eye()->head_mesh) : nullptr;
         }
 
         // Get the transform matrix defining the pose of the camera/agent. That's stored in agent_coords
@@ -1799,8 +2181,22 @@ export namespace craysim
         sm::vvec<float> bc_scale;
         // Skip some add_breadcrumb calls with this
         std::uint32_t breadcrumb_every = 1u;
+        // May not need this with target_move_counter?
+        std::uint32_t last_breadcrumb_count = 0u;
+        // When operating in csv playback mode, use this as the move_counter that we're going
+        // for. We step towards it, rather than teleporting there, so that any breadcrumbs that we
+        // need to place can be set in the correct location over the ground.
+        std::uint32_t target_move_counter = 0u;
         // Overall size multiplier for breadcrumbs
         float bc_mult = 1.0f;
+
+        // Visualization of collision detection (Collision Visualization cv)
+        mplot::InstancedScatterVisual<glver>* cvisvp = nullptr;
+        // Container for collisvis locations
+        sm::vvec<sm::vec<float, 3>> cv_coords = {};
+        sm::vvec<std::array<float, 3>> cv_clr = { mplot::colour::darkolivegreen2 };
+        sm::vvec<float> cv_alpha = { 1.0f };
+        sm::vvec<float> cv_scale = { 1.0f };
 
         // Client code gives us names of the navigation landscape. If we find the landscape, store a pointer to it with this
         mplot::VisualModel<glver>* land = nullptr;
@@ -1870,6 +2266,7 @@ export namespace craysim
 
         // The instantaneous velocity arising from the last movement
         sm::vec<float> instantaneous_velocity = {};
+        bool instantaneous_rotation = false;
 
         enum class state : std::uint16_t
         {
@@ -1978,85 +2375,113 @@ export namespace craysim
             if (this->vstate.test (state::freeze)) { return; } // Don't respond to movement keys
 
             // Process press/repeat key actions (none will work with Ctrl or Shift)
-            if (action == mplot::keyaction::press && !(mods & mplot::keymod::shift)) {
-                if (key == mplot::key::w) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::forward);
-                } else if (key == mplot::key::a && !mods) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::left);
-                } else if (key == mplot::key::d) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::right);
-                } else if (key == mplot::key::s) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::backward);
-                } else if (key == mplot::key::p) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::up);
-                } else if (key == mplot::key::l) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::down);
-                } else if (key == mplot::key::up) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_up);
-                } else if (key == mplot::key::down) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_down);
-                } else if (key == mplot::key::left) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_left);
-                } else if (key == mplot::key::right) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_right);
-                } else if (key == mplot::key::comma) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_roll_left);
-                } else if (key == mplot::key::period) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_roll_right);
-                } else if (key == mplot::key::end) {
-                    this->kcmd_speed = this->kcmd_speed * 0.5f;
-                    std::cout << "Speed reduced to " << this->kcmd_speed  << "m/s" << std::endl;
-                } else if (key == mplot::key::home) {
-                    this->kcmd_speed = this->kcmd_speed * 2.0f;
-                    std::cout << "Speed increased to " << this->kcmd_speed  << "m/s" << std::endl;
-                } else if (key == mplot::key::r) {
-                    this->stop();
-                    this->vstate.set (state::campose_reset_request);
-                } else if (key == mplot::key::insert) {
-                    this->bc_mult += 0.2f;
-                } else if (key == mplot::key::delete_key) {
-                    this->bc_mult -= 0.2f;
-                    if (this->bc_mult < 0.0f) { this->bc_mult = 0.0f; }
+            if ((action == mplot::keyaction::press || action == mplot::keyaction::repeat)
+                && !(mods & mplot::keymod::shift)) {
+
+                if (this->sim_opts.test (craysim::options::path_from_csv)) {
+                    // In CSV playback, keys are fwd/reverse/pause
+                    if (key == mplot::key::up) {
+                        // forwards
+                        this->target_move_counter += 1;
+                    } else if (key == mplot::key::down) {
+                        // rewind
+                        this->target_move_counter -= 1;
+                    } else if (key == mplot::key::left) {
+                        // rewind x10
+                        this->target_move_counter -= 10;
+                    } else if (key == mplot::key::right) {
+                        // forwards x10
+                        this->target_move_counter += 10;
+                    }
+                } else {
+                    if (action != mplot::keyaction::repeat) {
+                        if (key == mplot::key::w) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::forward);
+                        } else if (key == mplot::key::a && !mods) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::left);
+                        } else if (key == mplot::key::d) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::right);
+                        } else if (key == mplot::key::s) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::backward);
+                        } else if (key == mplot::key::p) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::up);
+                        } else if (key == mplot::key::l) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::down);
+                        } else if (key == mplot::key::up) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::rot_up);
+                        } else if (key == mplot::key::down) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::rot_down);
+                        } else if (key == mplot::key::left) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::rot_left);
+                        } else if (key == mplot::key::right) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::rot_right);
+                        } else if (key == mplot::key::comma) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::rot_roll_left);
+                        } else if (key == mplot::key::period) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::rot_roll_right);
+                        }
+                    }
                 }
 
+                if (action != mplot::keyaction::repeat) {
+                    if (key == mplot::key::end) {
+                        this->kcmd_speed = this->kcmd_speed * 0.5f;
+                        std::cout << "Speed reduced to " << this->kcmd_speed  << "m/s" << std::endl;
+                    } else if (key == mplot::key::home) {
+                        this->kcmd_speed = this->kcmd_speed * 2.0f;
+                        std::cout << "Speed increased to " << this->kcmd_speed  << "m/s" << std::endl;
+                    } else if (key == mplot::key::r) {
+                        this->stop();
+                        this->vstate.set (state::campose_reset_request);
+                    } else if (key == mplot::key::insert) {
+                        this->bc_mult += 0.2f;
+                    } else if (key == mplot::key::delete_key) {
+                        this->bc_mult -= 0.2f;
+                        if (this->bc_mult < 0.0f) { this->bc_mult = 0.0f; }
+                    }
+                }
             } else if (action == mplot::keyaction::release && !(mods & mplot::keymod::shift)) {
 
-                if (key == mplot::key::w) {
-                    this->move_state.reset (move_sense::forward);
-                } else if (key == mplot::key::a && !mods) {
-                    this->move_state.reset (move_sense::left);
-                } else if (key == mplot::key::d) {
-                    this->move_state.reset (move_sense::right);
-                } else if (key == mplot::key::s) {
-                    this->move_state.reset (move_sense::backward);
-                } else if (key == mplot::key::p) {
-                    this->move_state.reset (move_sense::up);
-                } else if (key == mplot::key::l) {
-                    this->move_state.reset (move_sense::down);
-                } else if (key == mplot::key::up) {
-                    this->move_state.reset (move_sense::rot_up);
-                } else if (key == mplot::key::down) {
-                    this->move_state.reset (move_sense::rot_down);
-                } else if (key == mplot::key::left) {
-                    this->move_state.reset (move_sense::rot_left);
-                } else if (key == mplot::key::right) {
-                    this->move_state.reset (move_sense::rot_right);
-                } else if (key == mplot::key::comma) {
-                    this->move_state.reset (move_sense::rot_roll_left);
-                } else if (key == mplot::key::period) {
-                    this->move_state.reset (move_sense::rot_roll_right);
+                if (this->sim_opts.test (craysim::options::path_from_csv)) {
+                    // Nothing to do
+                } else {
+                    if (key == mplot::key::w) {
+                        this->move_state.reset (move_sense::forward);
+                    } else if (key == mplot::key::a && !mods) {
+                        this->move_state.reset (move_sense::left);
+                    } else if (key == mplot::key::d) {
+                        this->move_state.reset (move_sense::right);
+                    } else if (key == mplot::key::s) {
+                        this->move_state.reset (move_sense::backward);
+                    } else if (key == mplot::key::p) {
+                        this->move_state.reset (move_sense::up);
+                    } else if (key == mplot::key::l) {
+                        this->move_state.reset (move_sense::down);
+                    } else if (key == mplot::key::up) {
+                        this->move_state.reset (move_sense::rot_up);
+                    } else if (key == mplot::key::down) {
+                        this->move_state.reset (move_sense::rot_down);
+                    } else if (key == mplot::key::left) {
+                        this->move_state.reset (move_sense::rot_left);
+                    } else if (key == mplot::key::right) {
+                        this->move_state.reset (move_sense::rot_right);
+                    } else if (key == mplot::key::comma) {
+                        this->move_state.reset (move_sense::rot_roll_left);
+                    } else if (key == mplot::key::period) {
+                        this->move_state.reset (move_sense::rot_roll_right);
+                    }
                 }
             }
 
@@ -2084,6 +2509,13 @@ export namespace craysim
 
                 } else if (key == mplot::key::space) {
                     this->vstate.flip (state::paused);
+
+                } else if (key == mplot::key::n0) {
+                    sim_opts.flip (craysim::options::visualize_collisions);
+                    sim_opts.set (craysim::options::find_collisions, sim_opts.test (craysim::options::visualize_collisions));
+                    if (this->sim_opts.test (craysim::options::visualize_collisions) == false && this->cvisvp != nullptr) {
+                        this->clear_collisvis();
+                    }
 
                 } else if (key == mplot::key::page_up) {
                     int csamp = getCurrentEyeSamplesPerOmmatidium();
@@ -2123,6 +2555,7 @@ export namespace craysim
                           << "c: Show agent's camera coordinate frame\n"
                           << "e: Show agent's compass frame\n"
                           << "o: Flip homing mode\n"
+                          << "0: Flip collision computation/visualization\n"
                           << "Esc: Call stop()\n"
                           << "f: Step when paused\n"
                           << "space: pause\n"
@@ -2133,7 +2566,7 @@ export namespace craysim
         }
     };
 
-    // Add a suitable 2D projection to show our ant eye (distributed with OCES) in a flat fiew
+    // Add a suitable 2D projection to show our ant eye (distributed with OCES) in a flat view
     template <int glver>
     void add_ant_eye_spherical_projection (craysim::visual<glver>& v, mplot::compoundray::EyeVisual<glver>* eyevm2, const std::uint32_t camidx)
     {
@@ -2143,7 +2576,11 @@ export namespace craysim
         sm::vec<> centre = { -0.00002f, 0, 0 };  // projection sphere centre
 
         if (v.oces_reader.contains (camidx) && v.oces_reader[camidx].read_success == true) {
-            sz = v.oces_reader[camidx].position.size();
+            sz = v.oces_reader[camidx].get_eye()->position.size(); // NOT necessarily same as compound ray
+                                                                   // eye specfied in glTF. THIS is why we have to have the SAME
+                                                                   // velox-head.gltf as the velox-head.eye
+                                                                   // (would be better to provide eye in oces
+                                                                   // format in single file)
             ps_rad = 0.0002f;
             centre = { -0.00054, -0.00009, -0.00002 };
         }
@@ -2173,8 +2610,8 @@ export namespace craysim
 
         // Second eye of the eye pair (another spherical projection)
         if (v.oces_reader.contains (camidx) && v.oces_reader[camidx].read_success == true) {
-            if (v.oces_reader[camidx].mirrors.empty() == false) {
-                centre = (v.oces_reader[camidx].mirrors[0] * centre).less_one_dim();
+            if (v.oces_reader[camidx].get_eye()->mirrors.empty() == false) {
+                centre = (v.oces_reader[camidx].get_eye()->mirrors[0] * centre).less_one_dim();
                 sm::vec<> twod_shift_left = twod_shift;
                 twod_shift_left[0] *= -1.0f;
                 twod_tr.set_identity();
