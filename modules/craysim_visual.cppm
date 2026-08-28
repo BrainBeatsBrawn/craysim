@@ -81,6 +81,7 @@ export namespace craysim
         show_fps,         // If true, show the FPS in the fps_label
         show_movenum,     // If true, show the current movement counter in the fps_label
         move_by_flying,   // If false, then hug the landscape (whether movement is by key, api or whatever); if true, fly
+        eye_is_hex,       // If true, the glTF encoded a file with .heye suffix (instead of .eye) indicating it is hexagonally arranged.
         can_exit          // If set, program can exit now
     };
 
@@ -341,7 +342,12 @@ export namespace craysim
                 this->efpaths[ci] = getEyeDataPath();
                 if (!this->efpaths[ci].empty()) {
                     my_compound_camera = ci;
-                    std::cout << "my_compound_camera = " << my_compound_camera << std::endl;
+                    std::cout << "my_compound_camera = " << my_compound_camera
+                              << " (" << this->efpaths[ci] << ")" << std::endl;
+                    if (this->efpaths[ci].find (".heye") != std::string::npos) {
+                        // Assume we are using a hexagonally arranged eye
+                        this->sim_opts.set (craysim::options::eye_is_hex);
+                    }
                 }
             }
 
@@ -394,9 +400,14 @@ export namespace craysim
                     std::cout << "No associated OCES file for a head with this one.\n";
                 } else {
                     std::cout << "Success loading OCES file " << oces_path << "\n";
+                    // Make the hex-equivalent eye
+                    if (this->sim_opts.test(craysim::options::eye_is_hex) == true) {
+                        std::cout << "Set up the hex equivalent of the OCES eye...\n";
+                        this->oces_reader[efp.first].setup_hexeye();
+                    }
                     // Read the head and make a VisualModel
                     constexpr float gam = 2.222222222222222f;
-                    oces_reader[efp.first].head_mesh.single_colour = {std::pow (0.345f, gam), std::pow (0.122f, gam), std::pow (0.082f, gam)};
+                    oces_reader[efp.first].get_eye()->head_mesh.single_colour = {std::pow (0.345f, gam), std::pow (0.122f, gam), std::pow (0.082f, gam)};
                     break;
                 }
             }
@@ -577,6 +588,8 @@ export namespace craysim
         void clear_breadcrumbs()
         {
             this->move_counter = 0;
+            this->target_move_counter = 0;
+            this->last_breadcrumb_count = 0;
             this->breadcrumb_coords.clear();
             this->breadcrumb_data.clear();
             // Leave bc_clr/bc_alpha/bc_scale for now
@@ -1353,7 +1366,7 @@ export namespace craysim
             this->agent_coords->setViewMatrix (cam_to_scene);
         }
 
-        bool csv_playback()
+        bool csv_playback_one (bool allow_add_breadcrumb = false)
         {
             bool rtn = true;
 
@@ -1447,10 +1460,10 @@ export namespace craysim
                 this->instantaneous_velocity = cam_to_scene.translation() - lastcamloc;
                 this->distance_moved += this->instantaneous_velocity.length();
 
-                if (this->sim_opts.test (craysim::options::breadcrumbs_csv)) {
-                    ++this->move_counter;
-                    if (this->move_counter % breadcrumb_every == 0u) {
+                if (allow_add_breadcrumb && this->sim_opts.test (craysim::options::breadcrumbs_csv)) {
+                    if ((this->move_counter + 1) % breadcrumb_every == 0u && this->move_counter > this->last_breadcrumb_count) {
                         this->add_breadcrumb (lastcamloc);
+                        this->last_breadcrumb_count = this->move_counter;
                     }
                 }
 
@@ -1469,6 +1482,28 @@ export namespace craysim
             if ((this->move_counter - 1) == 1) {
                 std::cout << "Update initial vm last locn\n";
                 this->setFollowedVM (this->eyes[0]);
+            }
+
+            return rtn;
+        }
+
+        bool csv_playback()
+        {
+            bool rtn = true;
+
+            if (target_move_counter < this->move_counter) {
+                // Go straight there, no breadcrumbs
+                this->move_counter = target_move_counter;
+                csv_playback_one (false);
+                return rtn;
+            }
+
+            while (this->move_counter <= target_move_counter) {
+                if (csv_playback_one (true) == false) {
+                    rtn = false;
+                    break;
+                }
+                this->move_counter++;
             }
 
             return rtn;
@@ -1847,6 +1882,8 @@ export namespace craysim
                         // In movie mode, finish as soon as the movie is made
                         this->signal_to_quit();
                     }
+                    this->target_move_counter++;
+
                 } else if (this->sim_opts.test (craysim::options::path_from_csv)
                            && this->csv_positions.size() <= this->move_counter
                            && this->sim_opts.test (craysim::options::making_movie)) {
@@ -1863,6 +1900,10 @@ export namespace craysim
             } else if (this->vstate.test (craysim::visual<glver>::state::paused) == true
                        && this->sim_opts.any_of ({craysim::options::api_movement, craysim::options::homing_mode})) {
                 this->api_rotate(); // BUT don't inc move counter! This enables rotating while paused
+            } else if (this->vstate.test (craysim::visual<glver>::state::paused) == true
+                       && this->sim_opts.test (craysim::options::path_from_csv)
+                       && this->csv_positions.size() > this->move_counter) {
+                this->csv_playback();
             }
 
             // Having moved, if we need to, we can re-compute the distance to any non-landscape objects that we might collide with.
@@ -1992,7 +2033,7 @@ export namespace craysim
 
         mplot::meshgroup* get_head_mesh (const std::uint32_t camidx)
         {
-            return this->oces_reader[camidx].read_success ? reinterpret_cast<mplot::meshgroup*>(&this->oces_reader[camidx].head_mesh) : nullptr;
+            return this->oces_reader[camidx].read_success ? reinterpret_cast<mplot::meshgroup*>(&this->oces_reader[camidx].get_eye()->head_mesh) : nullptr;
         }
 
         // Get the transform matrix defining the pose of the camera/agent. That's stored in agent_coords
@@ -2115,6 +2156,12 @@ export namespace craysim
         sm::vvec<float> bc_scale;
         // Skip some add_breadcrumb calls with this
         std::uint32_t breadcrumb_every = 1u;
+        // May not need this with target_move_counter?
+        std::uint32_t last_breadcrumb_count = 0u;
+        // When operating in csv playback mode, use this as the move_counter that we're going
+        // for. We step towards it, rather than teleporting there, so that any breadcrumbs that we
+        // need to place can be set in the correct location over the ground.
+        std::uint32_t target_move_counter = 0u;
         // Overall size multiplier for breadcrumbs
         float bc_mult = 1.0f;
 
@@ -2294,85 +2341,113 @@ export namespace craysim
             if (this->vstate.test (state::freeze)) { return; } // Don't respond to movement keys
 
             // Process press/repeat key actions (none will work with Ctrl or Shift)
-            if (action == mplot::keyaction::press && !(mods & mplot::keymod::shift)) {
-                if (key == mplot::key::w) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::forward);
-                } else if (key == mplot::key::a && !mods) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::left);
-                } else if (key == mplot::key::d) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::right);
-                } else if (key == mplot::key::s) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::backward);
-                } else if (key == mplot::key::p) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::up);
-                } else if (key == mplot::key::l) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::down);
-                } else if (key == mplot::key::up) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_up);
-                } else if (key == mplot::key::down) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_down);
-                } else if (key == mplot::key::left) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_left);
-                } else if (key == mplot::key::right) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_right);
-                } else if (key == mplot::key::comma) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_roll_left);
-                } else if (key == mplot::key::period) {
-                    this->vstate.reset (state::paused);
-                    this->move_state.set (move_sense::rot_roll_right);
-                } else if (key == mplot::key::end) {
-                    this->kcmd_speed = this->kcmd_speed * 0.5f;
-                    std::cout << "Speed reduced to " << this->kcmd_speed  << "m/s" << std::endl;
-                } else if (key == mplot::key::home) {
-                    this->kcmd_speed = this->kcmd_speed * 2.0f;
-                    std::cout << "Speed increased to " << this->kcmd_speed  << "m/s" << std::endl;
-                } else if (key == mplot::key::r) {
-                    this->stop();
-                    this->vstate.set (state::campose_reset_request);
-                } else if (key == mplot::key::insert) {
-                    this->bc_mult += 0.2f;
-                } else if (key == mplot::key::delete_key) {
-                    this->bc_mult -= 0.2f;
-                    if (this->bc_mult < 0.0f) { this->bc_mult = 0.0f; }
+            if ((action == mplot::keyaction::press || action == mplot::keyaction::repeat)
+                && !(mods & mplot::keymod::shift)) {
+
+                if (this->sim_opts.test (craysim::options::path_from_csv)) {
+                    // In CSV playback, keys are fwd/reverse/pause
+                    if (key == mplot::key::up) {
+                        // forwards
+                        this->target_move_counter += 1;
+                    } else if (key == mplot::key::down) {
+                        // rewind
+                        this->target_move_counter -= 1;
+                    } else if (key == mplot::key::left) {
+                        // rewind x10
+                        this->target_move_counter -= 10;
+                    } else if (key == mplot::key::right) {
+                        // forwards x10
+                        this->target_move_counter += 10;
+                    }
+                } else {
+                    if (action != mplot::keyaction::repeat) {
+                        if (key == mplot::key::w) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::forward);
+                        } else if (key == mplot::key::a && !mods) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::left);
+                        } else if (key == mplot::key::d) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::right);
+                        } else if (key == mplot::key::s) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::backward);
+                        } else if (key == mplot::key::p) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::up);
+                        } else if (key == mplot::key::l) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::down);
+                        } else if (key == mplot::key::up) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::rot_up);
+                        } else if (key == mplot::key::down) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::rot_down);
+                        } else if (key == mplot::key::left) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::rot_left);
+                        } else if (key == mplot::key::right) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::rot_right);
+                        } else if (key == mplot::key::comma) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::rot_roll_left);
+                        } else if (key == mplot::key::period) {
+                            this->vstate.reset (state::paused);
+                            this->move_state.set (move_sense::rot_roll_right);
+                        }
+                    }
                 }
 
+                if (action != mplot::keyaction::repeat) {
+                    if (key == mplot::key::end) {
+                        this->kcmd_speed = this->kcmd_speed * 0.5f;
+                        std::cout << "Speed reduced to " << this->kcmd_speed  << "m/s" << std::endl;
+                    } else if (key == mplot::key::home) {
+                        this->kcmd_speed = this->kcmd_speed * 2.0f;
+                        std::cout << "Speed increased to " << this->kcmd_speed  << "m/s" << std::endl;
+                    } else if (key == mplot::key::r) {
+                        this->stop();
+                        this->vstate.set (state::campose_reset_request);
+                    } else if (key == mplot::key::insert) {
+                        this->bc_mult += 0.2f;
+                    } else if (key == mplot::key::delete_key) {
+                        this->bc_mult -= 0.2f;
+                        if (this->bc_mult < 0.0f) { this->bc_mult = 0.0f; }
+                    }
+                }
             } else if (action == mplot::keyaction::release && !(mods & mplot::keymod::shift)) {
 
-                if (key == mplot::key::w) {
-                    this->move_state.reset (move_sense::forward);
-                } else if (key == mplot::key::a && !mods) {
-                    this->move_state.reset (move_sense::left);
-                } else if (key == mplot::key::d) {
-                    this->move_state.reset (move_sense::right);
-                } else if (key == mplot::key::s) {
-                    this->move_state.reset (move_sense::backward);
-                } else if (key == mplot::key::p) {
-                    this->move_state.reset (move_sense::up);
-                } else if (key == mplot::key::l) {
-                    this->move_state.reset (move_sense::down);
-                } else if (key == mplot::key::up) {
-                    this->move_state.reset (move_sense::rot_up);
-                } else if (key == mplot::key::down) {
-                    this->move_state.reset (move_sense::rot_down);
-                } else if (key == mplot::key::left) {
-                    this->move_state.reset (move_sense::rot_left);
-                } else if (key == mplot::key::right) {
-                    this->move_state.reset (move_sense::rot_right);
-                } else if (key == mplot::key::comma) {
-                    this->move_state.reset (move_sense::rot_roll_left);
-                } else if (key == mplot::key::period) {
-                    this->move_state.reset (move_sense::rot_roll_right);
+                if (this->sim_opts.test (craysim::options::path_from_csv)) {
+                    // Nothing to do
+                } else {
+                    if (key == mplot::key::w) {
+                        this->move_state.reset (move_sense::forward);
+                    } else if (key == mplot::key::a && !mods) {
+                        this->move_state.reset (move_sense::left);
+                    } else if (key == mplot::key::d) {
+                        this->move_state.reset (move_sense::right);
+                    } else if (key == mplot::key::s) {
+                        this->move_state.reset (move_sense::backward);
+                    } else if (key == mplot::key::p) {
+                        this->move_state.reset (move_sense::up);
+                    } else if (key == mplot::key::l) {
+                        this->move_state.reset (move_sense::down);
+                    } else if (key == mplot::key::up) {
+                        this->move_state.reset (move_sense::rot_up);
+                    } else if (key == mplot::key::down) {
+                        this->move_state.reset (move_sense::rot_down);
+                    } else if (key == mplot::key::left) {
+                        this->move_state.reset (move_sense::rot_left);
+                    } else if (key == mplot::key::right) {
+                        this->move_state.reset (move_sense::rot_right);
+                    } else if (key == mplot::key::comma) {
+                        this->move_state.reset (move_sense::rot_roll_left);
+                    } else if (key == mplot::key::period) {
+                        this->move_state.reset (move_sense::rot_roll_right);
+                    }
                 }
             }
 
@@ -2457,7 +2532,7 @@ export namespace craysim
         }
     };
 
-    // Add a suitable 2D projection to show our ant eye (distributed with OCES) in a flat fiew
+    // Add a suitable 2D projection to show our ant eye (distributed with OCES) in a flat view
     template <int glver>
     void add_ant_eye_spherical_projection (craysim::visual<glver>& v, mplot::compoundray::EyeVisual<glver>* eyevm2, const std::uint32_t camidx)
     {
@@ -2467,7 +2542,11 @@ export namespace craysim
         sm::vec<> centre = { -0.00002f, 0, 0 };  // projection sphere centre
 
         if (v.oces_reader.contains (camidx) && v.oces_reader[camidx].read_success == true) {
-            sz = v.oces_reader[camidx].position.size();
+            sz = v.oces_reader[camidx].get_eye()->position.size(); // NOT necessarily same as compound ray
+                                                                   // eye specfied in glTF. THIS is why we have to have the SAME
+                                                                   // velox-head.gltf as the velox-head.eye
+                                                                   // (would be better to provide eye in oces
+                                                                   // format in single file)
             ps_rad = 0.0002f;
             centre = { -0.00054, -0.00009, -0.00002 };
         }
@@ -2497,8 +2576,8 @@ export namespace craysim
 
         // Second eye of the eye pair (another spherical projection)
         if (v.oces_reader.contains (camidx) && v.oces_reader[camidx].read_success == true) {
-            if (v.oces_reader[camidx].mirrors.empty() == false) {
-                centre = (v.oces_reader[camidx].mirrors[0] * centre).less_one_dim();
+            if (v.oces_reader[camidx].get_eye()->mirrors.empty() == false) {
+                centre = (v.oces_reader[camidx].get_eye()->mirrors[0] * centre).less_one_dim();
                 sm::vec<> twod_shift_left = twod_shift;
                 twod_shift_left[0] *= -1.0f;
                 twod_tr.set_identity();
