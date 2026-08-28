@@ -25,54 +25,15 @@ import sm.jcv;
 
 export import mplot.gl.version;
 export import mplot.visualmodel;
-import mplot.tools;
 
 export import craysim.compoundray.ommatidium;
+export import craysim.compoundray.ommatidia_data;
 
 export namespace craysim::compoundray
 {
-    // Helper function. Read the compound-ray csv eye file into ommatidia. ommatidia should be a pointer to an allocate vector.
-    [[maybe_unused]] std::vector<craysim::compoundray::Ommatidium>*
-    readEye (std::vector<craysim::compoundray::Ommatidium>* ommatidia, const std::string& path)
-    {
-        if (ommatidia == nullptr) { return ommatidia; }
-
-        std::cout << "Path: " << path << std::endl;
-
-        ommatidia->clear();
-
-        std::ifstream eyeDataFile (path, std::ifstream::in);
-        if(!eyeDataFile.is_open()) {
-            std::cout << "Failed to open eye data file " << path << "\n";
-            return ommatidia;
-        }
-
-        std::string line;
-        size_t ommCount = 0;
-        while (std::getline (eyeDataFile, line)) {
-            std::vector<std::string> splitData = mplot::tools::stringToVector (line, " ");
-            if (splitData.size() < 8) {
-                std::cout << "Malformed line, continue...\n";
-                continue;
-            }
-            craysim::compoundray::Ommatidium o = {
-                sm::vec<float, 3>{ std::stof(splitData[0]), std::stof(splitData[1]), std::stof(splitData[2]) },
-                sm::vec<float, 3>{ std::stof(splitData[3]), std::stof(splitData[4]), std::stof(splitData[5]) },
-                std::stof(splitData[6]),
-                std::stof(splitData[7])
-            };
-            std::cout << "o: " << o.relativePosition << "; " << o.relativeDirection << "; " << o.acceptanceAngleRadians << "; " << o.focalPointOffset << std::endl;
-            ommatidia->push_back (o);
-            ommCount++;
-        }
-        std::cout <<  "  Loaded " << ommCount << " ommatidia." << std::endl;
-
-        return ommatidia;
-    }
-
     //! This class creates a visualization of a compound-ray format compound eye model
     template<int glver = mplot::gl::version_4_1>
-    class EyeVisual : public mplot::VisualModel<glver>
+    class EyeVisual : public craysim::compoundray::ommatidia_data<glver>
     {
     public:
         EyeVisual() {}
@@ -101,11 +62,11 @@ export namespace craysim::compoundray
 
         void reinitColours()
         {
-            if (ommData == nullptr) { return; }
-            if (ommData->empty()) { return; }
+            if (this->ommData == nullptr) { return; }
+            if (this->ommData->empty()) { return; }
             size_t n_verts = this->vertexColors.size(); // should be tube_vertices * n_omm
             if (n_verts == 0u) { return; } // model doesn't exist yet
-            size_t n_omm = ommData->size();
+            size_t n_omm = this->ommData->size();
 
             std::size_t i_3d = 0;
             if (show_3d) {
@@ -120,9 +81,9 @@ export namespace craysim::compoundray
                     // Update the 3 RGB values in vertexColors tube_vertices times
                     int j = 0;
                     for (; j < num_vertices; ++j) {
-                        this->vertexColors[i * num_vertices * 3 + j * 3] =     (*ommData)[i][0];
-                        this->vertexColors[i * num_vertices * 3 + j * 3 + 1] = (*ommData)[i][1];
-                        this->vertexColors[i * num_vertices * 3 + j * 3 + 2] = (*ommData)[i][2];
+                        this->vertexColors[i * num_vertices * 3 + j * 3] =     (*this->ommData)[i][0];
+                        this->vertexColors[i * num_vertices * 3 + j * 3 + 1] = (*this->ommData)[i][1];
+                        this->vertexColors[i * num_vertices * 3 + j * 3 + 2] = (*this->ommData)[i][2];
                     }
                 }
                 // i_3d is the index offset for the 3D part
@@ -135,7 +96,7 @@ export namespace craysim::compoundray
                 std::size_t tcounts = 0;
                 std::size_t d_2d = 0;
                 for (std::size_t i = 0u; i < this->projections[pri].triangle_counts.size(); ++i) {
-                    auto c = (*ommData)[this->projections[pri].site_indices[i] + this->projections[pri].start_i];
+                    auto c = (*this->ommData)[this->projections[pri].site_indices[i] + this->projections[pri].start_i];
                     std::size_t d_idx = i_3d + tcounts * 9; // 3 floats per vtx, 3 vtxs per tri
                     for (std::size_t j = 0; j < 3 * this->projections[pri].triangle_counts[i]; ++j) {
                         // This is ONE colour vertex. Need 3 per triangle.
@@ -279,19 +240,19 @@ export namespace craysim::compoundray
             this->indices.clear();
 
             // Sanity check our data pointers and return or throw
-            if (ommData == nullptr || ommatidia == nullptr) { return; }
-            if (ommatidia != nullptr && ommatidia->empty()) { return; }
-            if (ommData != nullptr && ommData->empty()) { return; }
-            if (ommData->size() != ommatidia->size()) {
+            if (this->ommData == nullptr || this->ommatidia == nullptr) { return; }
+            if (this->ommatidia != nullptr && this->ommatidia->empty()) { return; }
+            if (this->ommData != nullptr && this->ommData->empty()) { return; }
+            if (this->ommData->size() != this->ommatidia->size()) {
                 throw std::runtime_error ("sizes mismatch!");
             }
 
             // Draw ommatidia
-            size_t n_omm = ommData->size();
+            size_t n_omm = this->ommData->size();
 
             // Determine eye dimensions
             sm::interval<sm::vec<float, 3>> ommrng = sm::interval<sm::vec<float, 3>>::search_initialized();
-            for (size_t i = 0u; i < n_omm; ++i) { ommrng.update ((*ommatidia)[i].relativePosition); }
+            for (size_t i = 0u; i < n_omm; ++i) { ommrng.update ((*this->ommatidia)[i].relativePosition); }
             float ray_radius = ommrng.span().max() / 500.0f;
 
             // Find mean minimum ommatidial distance
@@ -303,7 +264,7 @@ export namespace craysim::compoundray
                         if (i == j) {
                             dist_to_other[j] = 10000.0f;
                         } else {
-                            dist_to_other[j] = ((*ommatidia)[i].relativePosition - (*ommatidia)[j].relativePosition).length();
+                            dist_to_other[j] = ((*this->ommatidia)[i].relativePosition - (*this->ommatidia)[j].relativePosition).length();
                         }
                     }
                     min_dist_to_other[i] = dist_to_other.min();
@@ -313,7 +274,7 @@ export namespace craysim::compoundray
             // First find out if all focal points are 0
             this->focal_point_sum = 0.0f;
             for (size_t i = 0u; i < n_omm; ++i) {
-                this->focal_point_sum += std::abs((*ommatidia)[i].focalPointOffset);
+                this->focal_point_sum += std::abs((*this->ommatidia)[i].focalPointOffset);
             }
 
             if (show_3d && this->focal_point_sum > 0.0f) {
@@ -323,11 +284,11 @@ export namespace craysim::compoundray
                 // tip, which can be thought of as the location of the ommatidial 'sensor'
                 for (size_t i = 0u; i < n_omm; ++i) {
                     // Ommatidia colour, position/shape
-                    std::array<float, 3> colour = (*ommData)[i];
-                    float angle = (*ommatidia)[i].acceptanceAngleRadians;
-                    float focal_point = std::abs((*ommatidia)[i].focalPointOffset);
-                    sm::vec<float, 3> pos = (*ommatidia)[i].relativePosition;
-                    sm::vec<float, 3> dir = (*ommatidia)[i].relativeDirection;
+                    std::array<float, 3> colour = (*this->ommData)[i];
+                    float angle = (*this->ommatidia)[i].acceptanceAngleRadians;
+                    float focal_point = std::abs((*this->ommatidia)[i].focalPointOffset);
+                    sm::vec<float, 3> pos = (*this->ommatidia)[i].relativePosition;
+                    sm::vec<float, 3> dir = (*this->ommatidia)[i].relativeDirection;
                     dir.renormalize();
                     // Tip of cone is 'behind' the position of the ommatidial face/lens
                     sm::vec<float, 3> ommatidial_detector_point = pos - dir * focal_point;
@@ -364,11 +325,11 @@ export namespace craysim::compoundray
                 // radius) to figure out the size of a cone, whose tip is the location of the
                 // ommatidial sensor AND the centre of the ommatidial lens
                 for (size_t i = 0u; i < n_omm; ++i) {
-                    std::array<float, 3> colour = (*ommData)[i];
-                    float angle = (*ommatidia)[i].acceptanceAngleRadians;
+                    std::array<float, 3> colour = (*this->ommData)[i];
+                    float angle = (*this->ommatidia)[i].acceptanceAngleRadians;
                     // pos will be the tip of the cone in this case, and the centre of the disc
-                    sm::vec<float, 3> pos = (*ommatidia)[i].relativePosition;
-                    sm::vec<float, 3> dir = (*ommatidia)[i].relativeDirection;
+                    sm::vec<float, 3> pos = (*this->ommatidia)[i].relativePosition;
+                    sm::vec<float, 3> dir = (*this->ommatidia)[i].relativeDirection;
                     dir.renormalize();
 
                     float dw = this->min_dist_to_other[i];
@@ -409,8 +370,8 @@ export namespace craysim::compoundray
                     for (size_t i = this->projections[pri].start_i; i < this->ommatidia->size() && i < this->projections[pri].end_i; ++i) {
                         sm::vec<sm::vec<>, 2> sph_coord = sm::geometry::ray_sphere_intersection (this->projections[pri].proj_centre,
                                                                                                  this->projections[pri].proj_radius,
-                                                                                                 (*ommatidia)[i].relativePosition,
-                                                                                                 -(*ommatidia)[i].relativeDirection);
+                                                                                                 (*this->ommatidia)[i].relativePosition,
+                                                                                                 -(*this->ommatidia)[i].relativeDirection);
                         if (sph_coord[0][0] != std::numeric_limits<float>::max()) {
                             sph_coord[0] -= this->projections[pri].proj_centre; // offset by centre before rotation
                             // sph_coord[0] is the coordinate for the ommatidia pixel on the sphere
@@ -443,8 +404,8 @@ export namespace craysim::compoundray
                 if (this->show_rays) {
                     for (size_t i = 0; i < this->ommatidia->size(); ++i) {
                         // Can now find intersections on our sphere
-                        sm::vec<> l0 = (*ommatidia)[i].relativePosition;
-                        sm::vec<> l = -(*ommatidia)[i].relativeDirection;
+                        sm::vec<> l0 = (*this->ommatidia)[i].relativePosition;
+                        sm::vec<> l = -(*this->ommatidia)[i].relativeDirection;
                         // Make rays a sensible length based on projections.proj_radius
                         l.renormalize();
                         l *= this->projections[pri].proj_radius * 3.0f;
@@ -529,8 +490,8 @@ export namespace craysim::compoundray
                 const sm::jcv::graphedge<double>* e = site->edges;
                 this->projections[pri].site_indices[i] = site->index;
                 std::array<float, 3> colour = mplot::colour::black;
-                if (site->index + this->projections[pri].start_i < ommData->size()) {
-                    colour = (*ommData)[site->index + this->projections[pri].start_i];
+                if (site->index + this->projections[pri].start_i < this->ommData->size()) {
+                    colour = (*this->ommData)[site->index + this->projections[pri].start_i];
                 } else {
                     std::cout << "Uh oh, can't access colour [" << site->index << " + " << this->projections[pri].start_i << "]\n";
                 }
@@ -575,17 +536,11 @@ export namespace craysim::compoundray
         bool show_fov = false;
         // either show_cones or show_fov are enabled and cones have been drawn
         bool cones_will_show = false;
-        // The colours detected by each ommatidium
-        std::vector<std::array<float, 3>>* ommData = nullptr;
-        // The position and orientation of each ommatidium
-        std::vector<craysim::compoundray::Ommatidium>* ommatidia = nullptr;
         // This map is indexed with site index. The values are sets of the neighbour indices. Only
         // populated if there is a 2D projection (with a Voronoi triangulation)
         std::map<std::uint32_t, std::set<std::uint32_t>> omm_neighbours;
         // Distances to the nearest ommatidia, for choosing disc size. Computed once only
         sm::vvec<float> min_dist_to_other = {};
-        // An optional head mesh
-        const mplot::meshgroup* head_mesh = nullptr;
         // If sum is 0, then we have a special case for rendering the eye as we have no focal point
         // offsets specified for this eye (and hence the optical radius of the ommatidium is not known)
         float focal_point_sum = 0.0f;
