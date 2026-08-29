@@ -34,6 +34,9 @@ export namespace craysim
 
         mplot::ColourMap<float> cm;
 
+        // If true, show the flat representation of the hexgrid, ignoring some/all info in ommatidia
+        bool show_flat = false;
+
         //! The length of the data structure that will be visualized. May be length of
         //! this->scalarData or of this->vectorData.
         std::uint32_t datasize = 0;
@@ -188,7 +191,7 @@ export namespace craysim
                     std::array<float, 3> clr = this->setColour (hi);
                     // If dataCoords has been populated, use these for hex positions, allowing for
                     // mapping of the 2D HexGrid onto a 3D manifold.
-                    if (this->ommatidia == nullptr) {
+                    if (this->ommatidia == nullptr || show_flat == true) {
                         this->vertex_push (this->hg->d_x[hi],
                                            this->hg->d_y[hi],
                                            0.0f, this->vertexPositions);
@@ -246,7 +249,6 @@ export namespace craysim
             if (this->datasize != nhex * 2u) {
                 //throw std::runtime_error ("datasize is not twice nhex");
                 std::cerr << "Returning because datasize = " << datasize << " != 2 * nhex = " << (2 * nhex) << std::endl;
-                std::cerr << "ommatidia size : " << this->ommatidia->size() << " ommData size " << this->ommData->size() << std::endl;
                 return;
             }
 
@@ -296,7 +298,7 @@ export namespace craysim
 
                     std::uint32_t dhi = hi + sdo;
 
-                    if (this->ommatidia == nullptr) {
+                    if (this->ommatidia == nullptr || show_flat == true) {
                         _x = this->hg->d_x[hi];
                         _y = this->hg->d_y[hi];
                         // Use the linear scaled copy of the data, dcopy.
@@ -336,11 +338,11 @@ export namespace craysim
                     // First push the 7 positions of the triangle vertices, starting with the centre
 
                     // Use the centre position as the first location for finding the normal vector
-                    vtx_0 = this->ommatidia == nullptr ? sm::vec<float>{ _x, _y, datumC } : coordC;
+                    vtx_0 = (this->ommatidia == nullptr || show_flat == true) ? sm::vec<float>{ _x, _y, datumC } : coordC;
                     this->vertex_push (vtx_0, this->vertexPositions);
 
                     // NE vertex
-                    if (this->ommatidia == nullptr) {
+                    if (this->ommatidia == nullptr || show_flat == true) {
                         if (this->hg->has_nne(hi) && this->hg->has_ne(hi)) {
                             // Compute mean of this->data[hi] and NE and E hexes
                             datum = third * (datumC + datumNNE + datumNE);
@@ -372,7 +374,7 @@ export namespace craysim
                     this->vertex_push (vtx_1, this->vertexPositions);
 
                     // SE vertex
-                    if (this->ommatidia == nullptr) {
+                    if (this->ommatidia == nullptr || show_flat == true) {
                         if (this->hg->has_ne(hi) && this->hg->has_nse(hi)) {
                             datum = third * (datumC + datumNE + datumNSE);
                         } else if (this->hg->has_ne(hi) || this->hg->has_nse(hi)) {
@@ -402,7 +404,7 @@ export namespace craysim
 
 
                     // S
-                    if (this->ommatidia == nullptr) {
+                    if (this->ommatidia == nullptr || show_flat == true) {
                         if (this->hg->has_nse(hi) && this->hg->has_nsw(hi)) {
                             datum = third * (datumC + datumNSE + datumNSW);
                         } else if (this->hg->has_nse(hi) || this->hg->has_nsw(hi)) {
@@ -432,7 +434,7 @@ export namespace craysim
                     this->vertex_push (vtx_3, this->vertexPositions);
 
                     // SW
-                    if (this->ommatidia == nullptr) {
+                    if (this->ommatidia == nullptr || show_flat == true) {
                         if (this->hg->has_nw(hi) && this->hg->has_nsw(hi)) {
                             datum = third * (datumC + datumNW + datumNSW);
                         } else if (this->hg->has_nw(hi) || this->hg->has_nsw(hi)) {
@@ -461,7 +463,7 @@ export namespace craysim
                     this->vertex_push (vtx_4, this->vertexPositions);
 
                     // NW
-                    if (this->ommatidia == nullptr) {
+                    if (this->ommatidia == nullptr || show_flat == true) {
                         if (this->hg->has_nnw(hi) && this->hg->has_nw(hi)) {
                             datum = third * (datumC + datumNNW + datumNW);
                         } else if (this->hg->has_nnw(hi) || this->hg->has_nw(hi)) {
@@ -490,7 +492,7 @@ export namespace craysim
                     this->vertex_push (vtx_5, this->vertexPositions);
 
                     // N
-                    if (this->ommatidia == nullptr) {
+                    if (this->ommatidia == nullptr || show_flat == true) {
                         if (this->hg->has_nnw(hi) && this->hg->has_nne(hi)) {
                             datum = third * (datumC + datumNNW + datumNNE);
                         } else if (this->hg->has_nnw(hi) || this->hg->has_nne(hi)) {
