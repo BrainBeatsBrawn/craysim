@@ -237,6 +237,11 @@ export namespace craysim
         // Compute vertices for the patchwork quilt of hexes
         void computeHexes()
         {
+            if (this->hg == nullptr) {
+                std::cerr << "Returning because hexgrid is a nullptr\n";
+                return;
+            }
+
             // Here's a complication. In a transformed grid, we can't rely on these. Should be able
             // to *compute* them though.
             float sr = this->hg->get_sr();
@@ -341,6 +346,9 @@ export namespace craysim
                     vtx_0 = (this->ommatidia == nullptr || show_flat == true) ? sm::vec<float>{ _x, _y, datumC } : coordC;
                     this->vertex_push (vtx_0, this->vertexPositions);
 
+                    // The rotation from the transformation in the hexgrid (if any)
+                    sm::mat<float, 3> lt = this->hg->tfm.linear().template as<float>();
+
                     // NE vertex
                     if (this->ommatidia == nullptr || show_flat == true) {
                         if (this->hg->has_nne(hi) && this->hg->has_ne(hi)) {
@@ -355,7 +363,9 @@ export namespace craysim
                         } else {
                             datum = datumC;
                         }
-                        vtx_1 = { (_x+sr), (_y+vne), datum };
+                        // Have to rotate after subtracting the center.
+                        sm::vec<float> crnr = lt * sm::vec<float>{ sr, vne, 0 };
+                        vtx_1 = crnr + sm::vec<float>{ _x, _y, datum };
                     } else {
                         // Similar logic, but for the coordinate, not just the data value
                         if (this->hg->has_nne(hi) && this->hg->has_ne(hi)) {
@@ -386,7 +396,8 @@ export namespace craysim
                         } else {
                             datum = datumC;
                         }
-                        vtx_2 = { (_x+sr), (_y-vne), datum };
+                        sm::vec<float> crnr = lt * sm::vec<float>{ sr, -vne, 0 };
+                        vtx_2 = crnr + sm::vec<float>{ _x, _y, datum };
                     } else {
                         if (this->hg->has_ne(hi) && this->hg->has_nse(hi)) {
                             vtx_2 = third * (coordC + coordNE + coordNSE);
@@ -416,8 +427,8 @@ export namespace craysim
                         } else {
                             datum = datumC;
                         }
-                        vtx_3 = { _x, (_y-lr), datum };
-
+                        sm::vec<float> crnr = lt * sm::vec<float>{ 0, -lr, 0 };
+                        vtx_3 = crnr + sm::vec<float>{ _x, _y, datum };
                     } else {
                         if (this->hg->has_nse(hi) && this->hg->has_nsw(hi)) {
                             vtx_3 = third * (coordC + coordNSE + coordNSW);
@@ -446,7 +457,8 @@ export namespace craysim
                         } else {
                             datum = datumC;
                         }
-                        vtx_4 = { (_x-sr), (_y-vne), datum };
+                        sm::vec<float> crnr = lt * sm::vec<float>{ -sr, -vne, 0 };
+                        vtx_4 = crnr + sm::vec<float>{ _x, _y, datum };
                     } else {
                         if (this->hg->has_nw(hi) && this->hg->has_nsw(hi)) {
                             vtx_4 = third * (coordC + coordNW + coordNSW);
@@ -475,7 +487,8 @@ export namespace craysim
                         } else {
                             datum = datumC;
                         }
-                        vtx_5 = { (_x-sr), (_y+vne), datum };
+                        sm::vec<float> crnr = lt * sm::vec<float>{ -sr, vne, 0 };
+                        vtx_5 = crnr + sm::vec<float>{ _x, _y, datum };
                     } else {
                         if (this->hg->has_nnw(hi) && this->hg->has_nw(hi)) {
                             vtx_5 = third * (coordC + coordNNW + coordNW);
@@ -504,7 +517,8 @@ export namespace craysim
                         } else {
                             datum = datumC;
                         }
-                        vtx_6 = { _x, (_y+lr), datum };
+                        sm::vec<float> crnr = lt * sm::vec<float>{ 0, lr, 0 };
+                        vtx_6 = crnr + sm::vec<float>{ _x, _y, datum };
                     } else {
                         if (this->hg->has_nnw(hi) && this->hg->has_nne(hi)) {
                             vtx_6 = third * (coordC + coordNNW + coordNNE);
