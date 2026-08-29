@@ -244,7 +244,10 @@ export namespace craysim
 
             // We have a double grid and use the hexgrid twice on the first half and second half.
             if (this->datasize != nhex * 2u) {
-                throw std::runtime_error ("datasize is not twice nhex");
+                //throw std::runtime_error ("datasize is not twice nhex");
+                std::cerr << "Returning because datasize = " << datasize << " != 2 * nhex = " << (2 * nhex) << std::endl;
+                std::cerr << "ommatidia size : " << this->ommatidia->size() << " ommData size " << this->ommData->size() << std::endl;
+                return;
             }
 
             // x and y coords on the HexGrid. May be replaced if ommatidia has been set.
