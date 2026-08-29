@@ -37,6 +37,9 @@ export namespace craysim
         // If true, show the flat representation of the hexgrid, ignoring some/all info in ommatidia
         bool show_flat = false;
 
+        // When showing flat, this is the transform that is applied to the hex vertices
+        sm::vec<float, 2> second_grid_offset = {};
+
         //! The length of the data structure that will be visualized. May be length of
         //! this->scalarData or of this->vectorData.
         std::uint32_t datasize = 0;
@@ -306,6 +309,13 @@ export namespace craysim
                     if (this->ommatidia == nullptr || show_flat == true) {
                         _x = this->hg->d_x[hi];
                         _y = this->hg->d_y[hi];
+
+                        if (sdo > 0) {
+                            // Transform _x and _y
+                            _x += this->second_grid_offset[0];
+                            _y += this->second_grid_offset[1];
+                        }
+
                         // Use the linear scaled copy of the data, dcopy.
                         datumC   = 0.0f; // '_z'
                         datumNE  = datumC; // this->hg->has_ne(hi)  ? this->dcopy[this->hg->ne(hi)]  : datumC; // datum Neighbour East
