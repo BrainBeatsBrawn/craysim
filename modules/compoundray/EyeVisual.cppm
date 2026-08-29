@@ -238,6 +238,7 @@ export namespace craysim::compoundray
             this->vertexNormals.clear();
             this->vertexColors.clear();
             this->indices.clear();
+            this->omm2d_all.clear(); // Clear stored 2D projections on (re)initialize
 
             // Sanity check our data pointers and return or throw
             if (this->ommData == nullptr || this->ommatidia == nullptr) { return; }
@@ -388,8 +389,8 @@ export namespace craysim::compoundray
                     }
                     // Make 2D Voronoi of omm2d.
                     this->voronoi2d (pri);
+                    // Store each 2d projection in omm2d_all
                     this->omm2d_all.push_back (omm2d);
-                    std::cout << "Pushback omm2d, now have " << this->omm2d_all.size() << " in omm2d_all\n";
                 }
             }
 
