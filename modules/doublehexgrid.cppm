@@ -37,8 +37,11 @@ export namespace craysim
         // If true, show the flat representation of the hexgrid, ignoring some/all info in ommatidia
         bool show_flat = false;
 
-        // When showing flat, this is the transform that is applied to the hex vertices
+        // When showing flat, this is the translation that is applied to the hex vertices of the second grid
         sm::vec<float, 2> second_grid_offset = {};
+
+        // When showing flat, should we flip the hex positions in the x (left-right) direction?
+        bool second_grid_flip_lr = false;
 
         //! The length of the data structure that will be visualized. May be length of
         //! this->scalarData or of this->vectorData.
@@ -354,6 +357,7 @@ export namespace craysim
 
                     // Use the centre position as the first location for finding the normal vector
                     vtx_0 = (this->ommatidia == nullptr || show_flat == true) ? sm::vec<float>{ _x, _y, datumC } : coordC;
+                    if (sdo > 0 && this->second_grid_flip_lr && this->show_flat) { vtx_0[0] *= -1; }
                     this->vertex_push (vtx_0, this->vertexPositions);
 
                     // The rotation from the transformation in the hexgrid (if any)
@@ -391,6 +395,7 @@ export namespace craysim
                             vtx_1 = coordC;
                         }
                     }
+                    if (sdo > 0 && this->second_grid_flip_lr && this->show_flat) { vtx_1[0] *= -1; }
                     this->vertex_push (vtx_1, this->vertexPositions);
 
                     // SE vertex
@@ -421,6 +426,7 @@ export namespace craysim
                             vtx_2 = coordC;
                         }
                     }
+                    if (sdo > 0 && this->second_grid_flip_lr && this->show_flat) { vtx_2[0] *= -1; }
                     this->vertex_push (vtx_2, this->vertexPositions);
 
 
@@ -452,6 +458,7 @@ export namespace craysim
                             vtx_3 = coordC;
                         }
                     }
+                    if (sdo > 0 && this->second_grid_flip_lr && this->show_flat) { vtx_3[0] *= -1; }
                     this->vertex_push (vtx_3, this->vertexPositions);
 
                     // SW
@@ -482,6 +489,7 @@ export namespace craysim
                             vtx_4 = coordC;
                         }
                     }
+                    if (sdo > 0 && this->second_grid_flip_lr && this->show_flat) { vtx_4[0] *= -1; }
                     this->vertex_push (vtx_4, this->vertexPositions);
 
                     // NW
@@ -512,6 +520,7 @@ export namespace craysim
                             vtx_5 = coordC;
                         }
                     }
+                    if (sdo > 0 && this->second_grid_flip_lr && this->show_flat) { vtx_5[0] *= -1; }
                     this->vertex_push (vtx_5, this->vertexPositions);
 
                     // N
@@ -542,6 +551,7 @@ export namespace craysim
                             vtx_6 = coordC;
                         }
                     }
+                    if (sdo > 0 && this->second_grid_flip_lr && this->show_flat) { vtx_6[0] *= -1; }
                     this->vertex_push (vtx_6, this->vertexPositions);
 
                     // From vtx_0, and any two of vtx_1 to vtx_6, compute two planes and thus the normal vector.
