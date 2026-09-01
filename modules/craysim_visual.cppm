@@ -424,8 +424,8 @@ export namespace craysim
 
             // Create an EyeVisual 'eye' in our scene just for camera 0
             auto eyevm = std::make_unique<craysim::compoundray::EyeVisual<glver>> (sm::vec<>{},
-                                                                                 &this->ommatidia_datas[0],
-                                                                                 this->get_ommatidia_ptr(0));
+                                                                                   &this->ommatidia_datas[0],
+                                                                                   this->get_ommatidia_ptr(0));
             eyevm->set_parent (this->get_id());
             eyevm->setViewMatrix (this->initial_camera_space);
             eyevm->name = "EyeVisual";
