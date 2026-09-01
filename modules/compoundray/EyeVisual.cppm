@@ -33,31 +33,27 @@ export namespace craysim::compoundray
 {
     //! This class creates a visualization of a compound-ray format compound eye model
     template<int glver = mplot::gl::version_4_1>
-    class EyeVisual : public craysim::compoundray::ommatidia_datamodel<glver>
+    struct EyeVisual : public craysim::compoundray::ommatidia_datamodel<glver>
     {
-    public:
         EyeVisual() {}
 
         //! Initialise with offset, start and end coordinates, radius and a single colour.
         EyeVisual (const sm::vec<float, 3> _offset,
                    std::vector<std::array<float, 3>>* _ommData,
-                   std::vector<craysim::compoundray::Ommatidium>* _ommatidia,
-                   const mplot::meshgroup* _head_mesh = nullptr)
+                   std::vector<craysim::compoundray::Ommatidium>* _ommatidia)
         {
-            this->init (_offset, _ommData, _ommatidia, _head_mesh);
+            this->init (_offset, _ommData, _ommatidia);
         }
 
         ~EyeVisual() {}
 
         void init (const sm::vec<float, 3> _offset,
                    std::vector<std::array<float, 3>>* _ommData,
-                   std::vector<craysim::compoundray::Ommatidium>* _ommatidia,
-                   const mplot::meshgroup* _head_mesh = nullptr)
+                   std::vector<craysim::compoundray::Ommatidium>* _ommatidia)
         {
             this->viewmatrix.translate (_offset);
             this->ommData = _ommData;
             this->ommatidia = _ommatidia;
-            this->head_mesh = _head_mesh;
         }
 
         void reinitColours()
@@ -422,9 +418,6 @@ export namespace craysim::compoundray
                     }
                 }
             }
-
-            // Optional head
-            if (this->head_mesh != nullptr) { this->computeMeshgroup (*this->head_mesh); }
         }
 
         void voronoi2d (uint32_t pri)

@@ -425,12 +425,12 @@ export namespace craysim
             // Create an EyeVisual 'eye' in our scene just for camera 0
             auto eyevm = std::make_unique<craysim::compoundray::EyeVisual<glver>> (sm::vec<>{},
                                                                                  &this->ommatidia_datas[0],
-                                                                                 this->get_ommatidia_ptr(0),
-                                                                                 this->get_head_mesh(0));
+                                                                                 this->get_ommatidia_ptr(0));
             eyevm->set_parent (this->get_id());
             eyevm->setViewMatrix (this->initial_camera_space);
             eyevm->name = "EyeVisual";
             eyevm->setGamma (this->agent_eyevisual_gamma);
+            if (this->get_head_mesh(0) != nullptr) { eyevm->addMeshgroup (*this->get_head_mesh(0)); }
             eyevm->finalize();
             this->eyes[0] = this->addVisualModel (eyevm);
             // This eye is the followed VM. If you teleport somewhere (such as with csv_playback) you have to call this again.
