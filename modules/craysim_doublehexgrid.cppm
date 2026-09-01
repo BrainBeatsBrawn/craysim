@@ -1,54 +1,88 @@
 module;
 
+#include <cstdint>
 #include <array>
 #include <stdexcept>
 #include <iostream>
 #include <cmath>
 
-export module craysim.doublehexgridvisual;
+export module craysim.doublehexgrid;
 
 export import sm.vec;
 export import sm.hexgrid;
-export import mplot.hexgridvisual;
+
+import mplot.colourmap;
+
+export import craysim.compoundray.ommatidia_datamodel;
 
 export namespace craysim
 {
-    //! Display a grid that has two sections, each of which uses a single hexgrid, but has separate coordinates.
-    template <class T, int glver = mplot::gl::version_4_1>
-    class DoubleHexGridVisual : public mplot::HexGridVisual<T, glver>
+    enum class HexVisMode
     {
-    public:
-        DoubleHexGridVisual(const sm::hexgrid<float>* _hg, const sm::vec<float> _offset)
-            : mplot::HexGridVisual<T, glver>(_hg, _offset) {}
+        Triangles, // Render triangles with a triangle vertex at the centre of each Hex. Fast (x3.7 cf. HexInterp).
+        HexInterp  // Render each hex as an actual hex made of 6 triangles.
+    };
+
+    //! Display a grid that has two sections, each of which uses a single hexgrid, but has separate coordinates.
+    template <std::int32_t glver = mplot::gl::version_4_1>
+    struct doublehexgrid : public craysim::compoundray::ommatidia_datamodel<glver>
+    {
+        // our hexgrid to visualize
+        const sm::hexgrid<float>* hg;
+
+        craysim::HexVisMode hexVisMode = craysim::HexVisMode::HexInterp;
+
+        mplot::ColourMap<float> cm;
+
+        // If true, show the flat representation of the hexgrids, ignoring the info in ommatidia
+        bool show_flat = false;
+
+        // When showing flat, should we flip the hex positions in the x (left-right) direction?
+        bool second_grid_flip_lr = false;
+
+        // When showing flat, should we flip the hex positions in the y (up-down) direction?
+        bool second_grid_flip_ud = false;
+
+        // When showing flat, this is the translation that is applied to the hex vertices of the
+        // second grid and first grid to move them apart. -half the offset is applied to the first
+        // grid and +half to the second grid.
+        sm::vec<float, 2> grid_offset = {};
+
+        //! The length of the data structure that will be visualized. May be length of
+        //! this->scalarData or of this->vectorData.
+        std::uint32_t datasize = 0;
+
+        doublehexgrid (const sm::hexgrid<float>* _hg, const sm::vec<float> _offset)
+        {
+            this->viewmatrix.translate (_offset);
+            this->hg = _hg;
+        }
 
         void reinitColours() // Originally coded as RGB only
         {
-            if (this->scalarData == nullptr && this->vectorData == nullptr) { return; }
+            if (this->scalarData == nullptr && this->ommData == nullptr) { return; }
 
             size_t n_verts = this->vertexColors.size(); // should be tube_vertices * n_omm
             if (n_verts == 0u) { return; } // model doesn't exist yet
 
-            // Need this? Yes, think so. Then use dcolour for the colours. Simples.
-            this->setupScaling();
-
-            if (this->hexVisMode == mplot::HexVisMode::Triangles) {
+            if (this->hexVisMode == craysim::HexVisMode::Triangles) {
 
                 if (this->scalarData != nullptr) {
                     // Update from scalarData via scaling
                     //size_t n_omm = this->scalarData->size();
-                    throw std::runtime_error ("DoubleHexGridVisual::reinitColours: Write logic for Triangle visMode and scalarData");
+                    throw std::runtime_error ("doublehexgrid::reinitColours: Write logic for Triangle visMode and scalarData");
 
-                } else { // this->vectorData != nullptr
-                    // Update from vectorData direct
-                    size_t n_omm = this->vectorData->size();
+                } else { // this->ommData != nullptr
+                    // Update from ommData direct
+                    size_t n_omm = this->ommData->size();
 
                     if (n_verts < 3 * n_omm) {
-                        throw std::runtime_error ("DoubleHexGridVisual: n_verts/n_omm sizes mismatch!");
+                        throw std::runtime_error ("doublehexgrid: n_verts/n_omm sizes mismatch!");
                     }
 
                     for (size_t i = 0u; i < n_omm; ++i) {
                         // Update the 3 RGB values in vertexColors
-                        std::array<float, 3> clr = this->cm.convert ((*this->vectorData)[i][0]/255.0f, (*this->vectorData)[i][1]/255.0f);
+                        std::array<float, 3> clr = this->cm.convert ((*this->ommData)[i][0]/255.0f, (*this->ommData)[i][1]/255.0f);
                         this->vertexColors[i*3] = clr[0];
                         this->vertexColors[i*3+1] = clr[1];
                         this->vertexColors[i*3+2] = clr[2];
@@ -60,15 +94,15 @@ export namespace craysim
                 if (this->scalarData != nullptr) {
                     // Update from scalarData via scaling
                     //size_t n_omm = this->scalarData->size();
-                    throw std::runtime_error ("DoubleHexGridVisual::reinitColours: Write logic for HexInterp visMode and scalarData");
+                    throw std::runtime_error ("doublehexgrid::reinitColours: Write logic for HexInterp visMode and scalarData");
 
-                } else { // this->vectorData != nullptr
-                    // Update from vectorData direct
-                    size_t n_omm = this->vectorData->size();
+                } else { // this->ommData != nullptr
+                    // Update from ommData direct
+                    size_t n_omm = this->ommData->size();
 
                     if (n_verts < 3 * 7 * n_omm) {
                         std::stringstream ee;
-                        ee << "DoubleHexGridVisual: n_verts["<<n_verts<<"] vs. n_omm["<<n_omm<<"] sizes mismatch (HexInterp)!";
+                        ee << "doublehexgrid: n_verts["<<n_verts<<"] vs. n_omm["<<n_omm<<"] sizes mismatch (HexInterp)!";
                         throw std::runtime_error (ee.str());
                     }
 
@@ -86,9 +120,9 @@ export namespace craysim
                                 this->vertexColors[base+2] = clr[2];
                             } else {
                                 // convert?
-                                this->vertexColors[base] = (*this->vectorData)[i][0];
-                                this->vertexColors[base+1] = (*this->vectorData)[i][1];
-                                this->vertexColors[base+2] = (*this->vectorData)[i][2];
+                                this->vertexColors[base] = (*this->ommData)[i][0];
+                                this->vertexColors[base+1] = (*this->ommData)[i][1];
+                                this->vertexColors[base+2] = (*this->ommData)[i][2];
                             }
                         }
                     }
@@ -97,6 +131,17 @@ export namespace craysim
 
             // Lastly, this call copies vertexColors (etc) into the OpenGL memory space
             this->reinit_colour_buffer();
+        }
+
+        //! Find datasize
+        void determine_datasize()
+        {
+            this->datasize = 0;
+            if (this->ommData != nullptr && !this->ommData->empty()) {
+                this->datasize = this->ommData->size();
+            } else if (this->scalarData != nullptr && !this->scalarData->empty()) {
+                this->datasize = this->scalarData->size();
+            } // else datasize remains 0
         }
 
         //! Do the computations to initialize the vertices that will represent the
@@ -111,12 +156,12 @@ export namespace craysim
             }
 
             switch (this->hexVisMode) {
-            case mplot::HexVisMode::Triangles:
+            case craysim::HexVisMode::Triangles:
             {
                 this->initializeVerticesTris();
                 break;
             }
-            case mplot::HexVisMode::HexInterp:
+            case craysim::HexVisMode::HexInterp:
             default:
             {
                 this->initializeVerticesHexesInterpolated();
@@ -125,44 +170,53 @@ export namespace craysim
             }
         }
 
+        //! Colour setting
+        std::array<float, 3> setColour (std::uint64_t ri)
+        {
+            std::array<float, 3> clr = { 0.0f, 0.0f, 0.0f };
+            if (this->scalarData == nullptr) {
+                if (this->ommData != nullptr) {
+                    // Colour comes directly from ommData
+                    clr = (*this->ommData)[ri];
+                }
+            } else {
+                // Colour from scalarData
+                clr = this->cm.convert ((*this->scalarData)[ri]);
+            }
+            return clr;
+        }
+
         // Initialize vertex buffer objects and vertex array object.
 
         //! Initialize as triangled. Gives a smooth surface with much
         //! less compute than initializeVerticesHexesInterpolated.
         void initializeVerticesTris()
         {
-            unsigned int nhex = this->hg->num();
+            std::uint32_t nhex = this->hg->num();
 
-            this->setupScaling();
-
-            std::array<float, 3> blkclr = {0,0,0};
-
-            // DoubleHexGridVisual has two 'sections' of data
-            for (unsigned int section = 0; section < 2; ++section) {
-                unsigned int sdo = section * nhex; // section data offset
-                for (unsigned int hi = 0; hi < nhex; ++hi) {
-                    unsigned int dhi = hi + sdo;
+            // doublehexgrid has two 'sections' of data
+            for (std::uint32_t section = 0; section < 2; ++section) {
+                std::uint32_t sdo = section * nhex; // section data offset
+                for (std::uint32_t hi = 0; hi < nhex; ++hi) {
+                    std::uint32_t dhi = hi + sdo;
                     std::array<float, 3> clr = this->setColour (hi);
                     // If dataCoords has been populated, use these for hex positions, allowing for
                     // mapping of the 2D HexGrid onto a 3D manifold.
-                    if (this->dataCoords == nullptr) {
-                        this->vertex_push (this->zoom*this->hg->d_x[hi],
-                                           this->zoom*this->hg->d_y[hi],
-                                           this->zoom*this->dcopy[hi], this->vertexPositions);
+                    if (this->ommatidia == nullptr || show_flat == true) {
+                        this->vertex_push (this->hg->d_x[hi],
+                                           this->hg->d_y[hi],
+                                           0.0f, this->vertexPositions);
 
                     } else { // Otherwise use the positions directly in the HexGrid:
-                        this->vertex_push ((*this->dataCoords)[dhi], this->vertexPositions);
+                        // positions from ommatidia
+                        this->vertex_push ((*this->ommatidia)[dhi].relativePosition, this->vertexPositions);
                     }
-                    if (this->markedHexes.count(hi)) {
-                        this->vertex_push (blkclr, this->vertexColors);
-                    } else {
-                        this->vertex_push (clr, this->vertexColors);
-                    }
+                    this->vertex_push (clr, this->vertexColors);
                     this->vertex_push (0.0f, 0.0f, 1.0f, this->vertexNormals);
                 }
 
                 // Build indices based on neighbour relations in the HexGrid
-                for (unsigned int hi = 0; hi < nhex; ++hi) {
+                for (std::uint32_t hi = 0; hi < nhex; ++hi) {
                     if (this->hg->has_nne(hi) && this->hg->has_ne(hi)) {
                         //std::cout << "1st triangle " << hi << "->" << NNE(hi) << "->" << NE(hi) << std::endl;
                         this->indices.push_back (sdo + hi);
@@ -191,25 +245,47 @@ export namespace craysim
             //this->computeSphere (sm::vec<float>{0,0,0}, mplot::colour::navy, 0.003f);
         }
 
+        // Apply the transforms in grid_offset and second_grid_flip_lr (etc)
+        void apply_grid_transforms (const std::uint32_t sdo, sm::vec<float>& _vtx)
+        {
+            if (this->show_flat == false) { return; }
+            if (sdo == 0) {
+                // First hexgrid
+                _vtx[0] -= this->grid_offset[0] / 2.0f;
+                _vtx[1] -= this->grid_offset[1] / 2.0f;
+            } else {
+                // Second hexgrid
+                if (this->second_grid_flip_lr) { _vtx[0] *= -1; }
+                if (this->second_grid_flip_ud) { _vtx[1] *= -1; }
+                _vtx[0] += this->grid_offset[0] / 2.0f;
+                _vtx[1] += this->grid_offset[1] / 2.0f;
+            }
+        }
+
         // Compute vertices for the patchwork quilt of hexes
         void computeHexes()
         {
+            if (this->hg == nullptr) {
+                std::cerr << "Returning because hexgrid is a nullptr\n";
+                return;
+            }
+
             // Here's a complication. In a transformed grid, we can't rely on these. Should be able
             // to *compute* them though.
             float sr = this->hg->get_sr();
             float vne = this->hg->get_v_to_ne();
             float lr = this->hg->get_lr();
 
-            unsigned int nhex = this->hg->num();
+            std::uint32_t nhex = this->hg->num();
 
             // We have a double grid and use the hexgrid twice on the first half and second half.
             if (this->datasize != nhex * 2u) {
-                throw std::runtime_error ("datasize is not twice nhex");
+                //throw std::runtime_error ("datasize is not twice nhex");
+                std::cerr << "Returning because datasize = " << datasize << " != 2 * nhex = " << (2 * nhex) << std::endl;
+                return;
             }
 
-            this->setupScaling();
-
-            // x and y coords on the HexGrid. May be replaced if dataCoords has been set.
+            // x and y coords on the HexGrid. May be replaced if ommatidia has been set.
             float _x = 0.0f;
             float _y = 0.0f;
             // These Ts are all floats, right?
@@ -235,47 +311,51 @@ export namespace craysim
             sm::vec<float> coordNSE = coordC;
 
             // Figure out an offset to centre the eyes about the current mv_offset. This
-            // is the centroid off dataCoords
+            // is the centroid of ommatidia
             sm::vec<float> coffs = {0,0,0};
-#if 1
-            if (this->dataCoords != nullptr) {
-                // dataCoords is ptr to vector<vec<float>>. The mean vector will work
-                coffs = -reinterpret_cast<sm::vvec<sm::vec<float, 3>>*>(this->dataCoords)->mean();
+
+            if (this->ommatidia != nullptr) {
+                // ommatidia is ptr to vector<Ommatidium>. The mean of relativePosition will work
+                for (auto omm : *this->ommatidia) {
+                    coffs -= omm.relativePosition;
+                }
+                coffs /= this->ommatidia->size();
             }
-#endif
-            for (unsigned int section = 0; section < 2; ++section) {
-                unsigned int sdo = section * nhex; // section data offset
-                for (unsigned int hi = 0; hi < nhex; ++hi) {
+
+            for (std::uint32_t section = 0; section < 2; ++section) {
+                std::uint32_t sdo = section * nhex; // section data offset
+                for (std::uint32_t hi = 0; hi < nhex; ++hi) {
 
                     vtx_1.zero();
                     vtx_2.zero();
 
-                    unsigned int dhi = hi + sdo;
+                    std::uint32_t dhi = hi + sdo;
 
-                    if (this->dataCoords == nullptr) {
+                    if (this->ommatidia == nullptr || show_flat == true) {
                         _x = this->hg->d_x[hi];
                         _y = this->hg->d_y[hi];
-                        // Use the linear scaled copy of the data, dcopy.
-                        datumC   = this->dcopy[hi]; // '_z'
-                        datumNE  = this->hg->has_ne(hi)  ? this->dcopy[this->hg->ne(hi)]  : datumC; // datum Neighbour East
-                        datumNNE = this->hg->has_nne(hi) ? this->dcopy[this->hg->nne(hi)] : datumC; // datum Neighbour North East
-                        datumNNW = this->hg->has_nnw(hi) ? this->dcopy[this->hg->nnw(hi)] : datumC; // etc
-                        datumNW  = this->hg->has_nw(hi)  ? this->dcopy[this->hg->nw(hi)]  : datumC;
-                        datumNSW = this->hg->has_nsw(hi) ? this->dcopy[this->hg->nsw(hi)] : datumC;
-                        datumNSE = this->hg->has_nse(hi) ? this->dcopy[this->hg->nse(hi)] : datumC;
-                    } else {
-                        // Get coordinates from dataCoords
-                        coordC = coffs + (*this->dataCoords)[dhi];
-                        _x = (*this->dataCoords)[dhi][0];
-                        _y = (*this->dataCoords)[dhi][1];
-                        datumC = (*this->dataCoords)[dhi][2];
 
-                        coordNE  = this->hg->has_ne(hi)  ? coffs + (*this->dataCoords)[sdo + this->hg->ne(hi)]  : coordC; // datum Neighbour East
-                        coordNNE = this->hg->has_nne(hi) ? coffs + (*this->dataCoords)[sdo + this->hg->nne(hi)] : coordC; // datum Neighbour North East
-                        coordNNW = this->hg->has_nnw(hi) ? coffs + (*this->dataCoords)[sdo + this->hg->nnw(hi)] : coordC; // etc
-                        coordNW  = this->hg->has_nw(hi)  ? coffs + (*this->dataCoords)[sdo + this->hg->nw(hi)]  : coordC;
-                        coordNSW = this->hg->has_nsw(hi) ? coffs + (*this->dataCoords)[sdo + this->hg->nsw(hi)] : coordC;
-                        coordNSE = this->hg->has_nse(hi) ? coffs + (*this->dataCoords)[sdo + this->hg->nse(hi)] : coordC;
+                        // Use the linear scaled copy of the data, dcopy.
+                        datumC   = 0.0f; // '_z'
+                        datumNE  = datumC; // this->hg->has_ne(hi)  ? this->dcopy[this->hg->ne(hi)]  : datumC; // datum Neighbour East
+                        datumNNE = datumC; // this->hg->has_nne(hi) ? this->dcopy[this->hg->nne(hi)] : datumC; // datum Neighbour North East
+                        datumNNW = datumC; // this->hg->has_nnw(hi) ? this->dcopy[this->hg->nnw(hi)] : datumC; // etc
+                        datumNW  = datumC; // this->hg->has_nw(hi)  ? this->dcopy[this->hg->nw(hi)]  : datumC;
+                        datumNSW = datumC; // this->hg->has_nsw(hi) ? this->dcopy[this->hg->nsw(hi)] : datumC;
+                        datumNSE = datumC; // this->hg->has_nse(hi) ? this->dcopy[this->hg->nse(hi)] : datumC;
+                    } else {
+                        // Get coordinates from ommatidia
+                        coordC = coffs + (*this->ommatidia)[dhi].relativePosition;
+                        _x = (*this->ommatidia)[dhi].relativePosition[0];
+                        _y = (*this->ommatidia)[dhi].relativePosition[1];
+                        datumC = (*this->ommatidia)[dhi].relativePosition[2];
+
+                        coordNE  = this->hg->has_ne(hi)  ? coffs + (*this->ommatidia)[sdo + this->hg->ne(hi)].relativePosition  : coordC; // datum Neighbour East
+                        coordNNE = this->hg->has_nne(hi) ? coffs + (*this->ommatidia)[sdo + this->hg->nne(hi)].relativePosition : coordC; // datum Neighbour North East
+                        coordNNW = this->hg->has_nnw(hi) ? coffs + (*this->ommatidia)[sdo + this->hg->nnw(hi)].relativePosition : coordC; // etc
+                        coordNW  = this->hg->has_nw(hi)  ? coffs + (*this->ommatidia)[sdo + this->hg->nw(hi)].relativePosition  : coordC;
+                        coordNSW = this->hg->has_nsw(hi) ? coffs + (*this->ommatidia)[sdo + this->hg->nsw(hi)].relativePosition : coordC;
+                        coordNSE = this->hg->has_nse(hi) ? coffs + (*this->ommatidia)[sdo + this->hg->nse(hi)].relativePosition : coordC;
 
                         datumNE = coordNE[2];
                         datumNNE = coordNNE[2];
@@ -288,20 +368,19 @@ export namespace craysim
                     // Use a single colour for each hex, even though hex z positions are
                     // interpolated. Do the _colour_ scaling:
                     std::array<float, 3> clr = this->setColour (hi);
-                    if (this->showboundary && (this->hg->vhexen[hi])->boundary_hex() == true) {
-                        this->markHex (hi);
-                    }
-                    if (this->showcentre && _x == 0.0f && _y == 0.0f) { this->markHex (hi); }
-                    std::array<float, 3> blkclr = {0,0,0};
 
                     // First push the 7 positions of the triangle vertices, starting with the centre
 
                     // Use the centre position as the first location for finding the normal vector
-                    vtx_0 = this->dataCoords == nullptr ? sm::vec<float>{ _x, _y, datumC } : coordC;
-                    this->vertex_push (this->zoom * vtx_0, this->vertexPositions);
+                    vtx_0 = (this->ommatidia == nullptr || show_flat == true) ? sm::vec<float>{ _x, _y, datumC } : coordC;
+                    this->apply_grid_transforms (sdo, vtx_0);
+                    this->vertex_push (vtx_0, this->vertexPositions);
+
+                    // The rotation from the transformation in the hexgrid (if any)
+                    sm::mat<float, 3> lt = this->hg->tfm.linear().template as<float>();
 
                     // NE vertex
-                    if (this->dataCoords == nullptr) {
+                    if (this->ommatidia == nullptr || show_flat == true) {
                         if (this->hg->has_nne(hi) && this->hg->has_ne(hi)) {
                             // Compute mean of this->data[hi] and NE and E hexes
                             datum = third * (datumC + datumNNE + datumNE);
@@ -314,7 +393,9 @@ export namespace craysim
                         } else {
                             datum = datumC;
                         }
-                        vtx_1 = { (_x+sr), (_y+vne), datum };
+                        // Have to rotate after subtracting the center.
+                        sm::vec<float> crnr = lt * sm::vec<float>{ sr, vne, 0 };
+                        vtx_1 = crnr + sm::vec<float>{ _x, _y, datum };
                     } else {
                         // Similar logic, but for the coordinate, not just the data value
                         if (this->hg->has_nne(hi) && this->hg->has_ne(hi)) {
@@ -330,10 +411,11 @@ export namespace craysim
                             vtx_1 = coordC;
                         }
                     }
-                    this->vertex_push (this->zoom * vtx_1, this->vertexPositions);
+                    this->apply_grid_transforms (sdo, vtx_1);
+                    this->vertex_push (vtx_1, this->vertexPositions);
 
                     // SE vertex
-                    if (this->dataCoords == nullptr) {
+                    if (this->ommatidia == nullptr || show_flat == true) {
                         if (this->hg->has_ne(hi) && this->hg->has_nse(hi)) {
                             datum = third * (datumC + datumNE + datumNSE);
                         } else if (this->hg->has_ne(hi) || this->hg->has_nse(hi)) {
@@ -345,7 +427,8 @@ export namespace craysim
                         } else {
                             datum = datumC;
                         }
-                        vtx_2 = { (_x+sr), (_y-vne), datum };
+                        sm::vec<float> crnr = lt * sm::vec<float>{ sr, -vne, 0 };
+                        vtx_2 = crnr + sm::vec<float>{ _x, _y, datum };
                     } else {
                         if (this->hg->has_ne(hi) && this->hg->has_nse(hi)) {
                             vtx_2 = third * (coordC + coordNE + coordNSE);
@@ -359,11 +442,12 @@ export namespace craysim
                             vtx_2 = coordC;
                         }
                     }
-                    this->vertex_push (this->zoom * vtx_2, this->vertexPositions);
+                    this->apply_grid_transforms (sdo, vtx_2);
+                    this->vertex_push (vtx_2, this->vertexPositions);
 
 
                     // S
-                    if (this->dataCoords == nullptr) {
+                    if (this->ommatidia == nullptr || show_flat == true) {
                         if (this->hg->has_nse(hi) && this->hg->has_nsw(hi)) {
                             datum = third * (datumC + datumNSE + datumNSW);
                         } else if (this->hg->has_nse(hi) || this->hg->has_nsw(hi)) {
@@ -375,8 +459,8 @@ export namespace craysim
                         } else {
                             datum = datumC;
                         }
-                        vtx_3 = { _x, (_y-lr), datum };
-
+                        sm::vec<float> crnr = lt * sm::vec<float>{ 0, -lr, 0 };
+                        vtx_3 = crnr + sm::vec<float>{ _x, _y, datum };
                     } else {
                         if (this->hg->has_nse(hi) && this->hg->has_nsw(hi)) {
                             vtx_3 = third * (coordC + coordNSE + coordNSW);
@@ -390,10 +474,11 @@ export namespace craysim
                             vtx_3 = coordC;
                         }
                     }
-                    this->vertex_push (this->zoom * vtx_3, this->vertexPositions);
+                    this->apply_grid_transforms (sdo, vtx_3);
+                    this->vertex_push (vtx_3, this->vertexPositions);
 
                     // SW
-                    if (this->dataCoords == nullptr) {
+                    if (this->ommatidia == nullptr || show_flat == true) {
                         if (this->hg->has_nw(hi) && this->hg->has_nsw(hi)) {
                             datum = third * (datumC + datumNW + datumNSW);
                         } else if (this->hg->has_nw(hi) || this->hg->has_nsw(hi)) {
@@ -405,7 +490,8 @@ export namespace craysim
                         } else {
                             datum = datumC;
                         }
-                        vtx_4 = { (_x-sr), (_y-vne), datum };
+                        sm::vec<float> crnr = lt * sm::vec<float>{ -sr, -vne, 0 };
+                        vtx_4 = crnr + sm::vec<float>{ _x, _y, datum };
                     } else {
                         if (this->hg->has_nw(hi) && this->hg->has_nsw(hi)) {
                             vtx_4 = third * (coordC + coordNW + coordNSW);
@@ -419,10 +505,11 @@ export namespace craysim
                             vtx_4 = coordC;
                         }
                     }
-                    this->vertex_push (this->zoom * vtx_4, this->vertexPositions);
+                    this->apply_grid_transforms (sdo, vtx_4);
+                    this->vertex_push (vtx_4, this->vertexPositions);
 
                     // NW
-                    if (this->dataCoords == nullptr) {
+                    if (this->ommatidia == nullptr || show_flat == true) {
                         if (this->hg->has_nnw(hi) && this->hg->has_nw(hi)) {
                             datum = third * (datumC + datumNNW + datumNW);
                         } else if (this->hg->has_nnw(hi) || this->hg->has_nw(hi)) {
@@ -434,7 +521,8 @@ export namespace craysim
                         } else {
                             datum = datumC;
                         }
-                        vtx_5 = { (_x-sr), (_y+vne), datum };
+                        sm::vec<float> crnr = lt * sm::vec<float>{ -sr, vne, 0 };
+                        vtx_5 = crnr + sm::vec<float>{ _x, _y, datum };
                     } else {
                         if (this->hg->has_nnw(hi) && this->hg->has_nw(hi)) {
                             vtx_5 = third * (coordC + coordNNW + coordNW);
@@ -448,10 +536,11 @@ export namespace craysim
                             vtx_5 = coordC;
                         }
                     }
-                    this->vertex_push (this->zoom * vtx_5, this->vertexPositions);
+                    this->apply_grid_transforms (sdo, vtx_5);
+                    this->vertex_push (vtx_5, this->vertexPositions);
 
                     // N
-                    if (this->dataCoords == nullptr) {
+                    if (this->ommatidia == nullptr || show_flat == true) {
                         if (this->hg->has_nnw(hi) && this->hg->has_nne(hi)) {
                             datum = third * (datumC + datumNNW + datumNNE);
                         } else if (this->hg->has_nnw(hi) || this->hg->has_nne(hi)) {
@@ -463,7 +552,8 @@ export namespace craysim
                         } else {
                             datum = datumC;
                         }
-                        vtx_6 = { _x, (_y+lr), datum };
+                        sm::vec<float> crnr = lt * sm::vec<float>{ 0, lr, 0 };
+                        vtx_6 = crnr + sm::vec<float>{ _x, _y, datum };
                     } else {
                         if (this->hg->has_nnw(hi) && this->hg->has_nne(hi)) {
                             vtx_6 = third * (coordC + coordNNW + coordNNE);
@@ -477,14 +567,15 @@ export namespace craysim
                             vtx_6 = coordC;
                         }
                     }
-                    this->vertex_push (this->zoom * vtx_6, this->vertexPositions);
+                    this->apply_grid_transforms (sdo, vtx_6);
+                    this->vertex_push (vtx_6, this->vertexPositions);
 
                     // From vtx_0, and any two of vtx_1 to vtx_6, compute two planes and thus the normal vector.
                     sm::vec<float> plane1 = {0,0,0};
                     sm::vec<float> plane2 = {0,0,0};
 
                     // First get the first plane
-                    int plane1_vtx = -1;
+                    std::int32_t plane1_vtx = -1;
                     if ((vtx_1 - vtx_0).length() > 0.0f) {
                         plane1 = vtx_1 - vtx_0;
                         plane1_vtx = 1;
@@ -504,7 +595,7 @@ export namespace craysim
                         plane1 = vtx_6 - vtx_0;
                         plane1_vtx = 6;
                     } else {
-                        throw std::runtime_error ("DoubleHexGridVisual: vtx_0 has no neighbour?!");
+                        throw std::runtime_error ("doublehexgrid: vtx_0 has no neighbour?!");
                     }
 
                     // Now select a second plane
@@ -536,40 +627,14 @@ export namespace craysim
                     this->vertex_push (vnorm, this->vertexNormals);
                     this->vertex_push (vnorm, this->vertexNormals);
 
-                    // Usually seven vertices with the same colour, but if the hex is
-                    // marked, then three of the vertices are given the colour black,
-                    // marking the hex out visually.
-                    if (std::isnan(this->dcolour[hi])) {
-                        this->vertex_push (clr, this->vertexColors);
-                        this->vertex_push (blkclr, this->vertexColors);
-                        this->vertex_push (blkclr, this->vertexColors);
-                        this->vertex_push (blkclr, this->vertexColors);
-                        this->vertex_push (blkclr, this->vertexColors);
-                        this->vertex_push (blkclr, this->vertexColors);
-                        this->vertex_push (blkclr, this->vertexColors);
-                    } else {
-                        this->vertex_push (clr, this->vertexColors);
-                        if (this->markedHexes.count(hi)) {
-                            this->vertex_push (blkclr, this->vertexColors);
-                        } else {
-                            this->vertex_push (clr, this->vertexColors);
-                        }
-
-                        this->vertex_push (clr, this->vertexColors);
-
-                        if (this->markedHexes.count(hi)) {
-                            this->vertex_push (blkclr, this->vertexColors);
-                        } else {
-                            this->vertex_push (clr, this->vertexColors);
-                        }
-                        this->vertex_push (clr, this->vertexColors);
-                        if (this->markedHexes.count(hi)) {
-                            this->vertex_push (blkclr, this->vertexColors);
-                        } else {
-                            this->vertex_push (clr, this->vertexColors);
-                        }
-                        this->vertex_push (clr, this->vertexColors);
-                    }
+                    // Seven vertices with the same colour
+                    this->vertex_push (clr, this->vertexColors);
+                    this->vertex_push (clr, this->vertexColors);
+                    this->vertex_push (clr, this->vertexColors);
+                    this->vertex_push (clr, this->vertexColors);
+                    this->vertex_push (clr, this->vertexColors);
+                    this->vertex_push (clr, this->vertexColors);
+                    this->vertex_push (clr, this->vertexColors);
 
                     // Define indices now to produce the 6 triangles in the hex
                     this->indices.push_back (this->idx+1);

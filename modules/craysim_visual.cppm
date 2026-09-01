@@ -2155,7 +2155,7 @@ export namespace craysim
         // pointer-to-a-visualization for each compoundray camera.
         std::map<std::uint32_t, craysim::compoundray::EyeVisual<glver>*> eyes;
         // Allows for multiple EyeVisuals for each compoundray camera
-        std::map<std::uint32_t, std::vector<craysim::compoundray::EyeVisual<glver>*>> other_eyes;
+        std::map<std::uint32_t, std::vector<craysim::compoundray::ommatidia_datamodel<glver>*>> other_eyes;
 
         // You may have a VisualModel of an 'agent body' to go along with your EyeVisual
         mplot::VisualModel<glver>* agent_body = nullptr;

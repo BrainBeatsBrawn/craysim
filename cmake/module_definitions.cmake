@@ -41,19 +41,13 @@ macro(setup_module_variables_for_craysim craysim_directory mathplot_directory ma
     ${mathplot_directory}/mplot/fps/profiler.cppm
     ${craysim_directory}/modules/compoundray/interop.cppm
     ${craysim_directory}/modules/compoundray/Ommatidium.cppm
+    ${craysim_directory}/modules/compoundray/ommatidia_datamodel.cppm
     ${craysim_directory}/modules/compoundray/EyeVisual.cppm
     ${mathplot_directory}/mplot/VerticesVisual.cppm
     ${mathplot_directory}/mplot/NormalsVisual.cppm
     ${mathplot_directory}/mplot/InstancedScatterVisual.cppm
   )
   list(REMOVE_DUPLICATES CRAYSIM_MATHPLOT_MODULES)
-
-  set(CRAYSIM_MATHPLOT_DOUBLEHEX_MODULES
-    ${mathplot_directory}/mplot/ScatterVisual.cppm
-    ${mathplot_directory}/mplot/QuiverVisual.cppm
-    ${mathplot_directory}/mplot/HexGridVisual.cppm
-    ${mathplot_directory}/mplot/LengthscaleVisual.cppm
-  )
 
   set(CRAYSIM_MODULES
     ${CRAYSIM_MATHS_MODULES}
@@ -64,7 +58,6 @@ macro(setup_module_variables_for_craysim craysim_directory mathplot_directory ma
 
   set(CRAYSIM_DOUBLEHEX_MODULES
     ${CRAYSIM_MATHS_DOUBLEHEX_MODULES}
-    ${CRAYSIM_MATHPLOT_DOUBLEHEX_MODULES}
     ${craysim_directory}/modules/craysim_doublehexgrid.cppm
   )
   list(REMOVE_DUPLICATES CRAYSIM_DOUBLEHEX_MODULES)
