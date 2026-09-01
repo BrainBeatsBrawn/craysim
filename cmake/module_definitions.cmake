@@ -58,7 +58,7 @@ macro(setup_module_variables_for_craysim craysim_directory mathplot_directory ma
 
   set(CRAYSIM_DOUBLEHEX_MODULES
     ${CRAYSIM_MATHS_DOUBLEHEX_MODULES}
-    ${craysim_directory}/modules/doublehexgrid.cppm
+    ${craysim_directory}/modules/craysim_doublehexgrid.cppm
   )
   list(REMOVE_DUPLICATES CRAYSIM_DOUBLEHEX_MODULES)
 
