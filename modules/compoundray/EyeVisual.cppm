@@ -27,13 +27,13 @@ export import mplot.gl.version;
 export import mplot.visualmodel;
 
 export import craysim.compoundray.ommatidium;
-export import craysim.compoundray.ommatidia_data;
+export import craysim.compoundray.ommatidia_datamodel;
 
 export namespace craysim::compoundray
 {
     //! This class creates a visualization of a compound-ray format compound eye model
     template<int glver = mplot::gl::version_4_1>
-    class EyeVisual : public craysim::compoundray::ommatidia_data<glver>
+    class EyeVisual : public craysim::compoundray::ommatidia_datamodel<glver>
     {
     public:
         EyeVisual() {}

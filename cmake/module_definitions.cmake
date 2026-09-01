@@ -41,7 +41,7 @@ macro(setup_module_variables_for_craysim craysim_directory mathplot_directory ma
     ${mathplot_directory}/mplot/fps/profiler.cppm
     ${craysim_directory}/modules/compoundray/interop.cppm
     ${craysim_directory}/modules/compoundray/Ommatidium.cppm
-    ${craysim_directory}/modules/compoundray/ommatidia_data.cppm
+    ${craysim_directory}/modules/compoundray/ommatidia_datamodel.cppm
     ${craysim_directory}/modules/compoundray/EyeVisual.cppm
     ${mathplot_directory}/mplot/VerticesVisual.cppm
     ${mathplot_directory}/mplot/NormalsVisual.cppm

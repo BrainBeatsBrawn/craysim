@@ -13,7 +13,7 @@ export import sm.hexgrid;
 
 import mplot.colourmap;
 
-export import craysim.compoundray.ommatidia_data;
+export import craysim.compoundray.ommatidia_datamodel;
 
 export namespace craysim
 {
@@ -25,7 +25,7 @@ export namespace craysim
 
     //! Display a grid that has two sections, each of which uses a single hexgrid, but has separate coordinates.
     template <std::int32_t glver = mplot::gl::version_4_1>
-    struct doublehexgrid : public craysim::compoundray::ommatidia_data<glver>
+    struct doublehexgrid : public craysim::compoundray::ommatidia_datamodel<glver>
     {
         // our hexgrid to visualize
         const sm::hexgrid<float>* hg;

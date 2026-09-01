@@ -14,7 +14,7 @@ module;
 #include <map>
 #include <set>
 
-export module craysim.compoundray.ommatidia_data;
+export module craysim.compoundray.ommatidia_datamodel;
 
 export import sm.mathconst;
 export import sm.vec;
@@ -27,8 +27,17 @@ export import craysim.compoundray.ommatidium;
 
 export namespace craysim::compoundray
 {
+    /**
+     * A datamodel layer class for VisualModels that visualize the data format used in
+     * compound-ray. VisualModels that extend this class have access to: a) a pointer to a vector of
+     * Ommatidium data types that give access to the position and orientation of each ommatidium b)
+     * pointers to vector and scalar data values for each ommatidium.
+     *
+     * Compare this class with mplot::VisualDataModel, which does a similar, though more generic
+     * job.
+     */
     template <std::int32_t glver>
-    struct ommatidia_data : public mplot::VisualModel<glver>
+    struct ommatidia_datamodel : public mplot::VisualModel<glver>
     {
         // We require a reinitColours function in derived types
         virtual void reinitColours() = 0;
