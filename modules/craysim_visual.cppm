@@ -1701,7 +1701,7 @@ export namespace craysim
             // overall search distance (agent_sz * up_to) is scaled by the same factor, so a ray
             // still gets roughly @up_to samples, just spread @sample_spacing_mult times farther
             // apart (and the total search radius grows by the same factor).
-            constexpr float sample_spacing_mult = 20.0f; // 10.0 * 1.3
+            constexpr float sample_spacing_mult = 10.0f;
 
             float search_distance = agent_sz;
             float up_to_dist = agent_sz * up_to * sample_spacing_mult;
