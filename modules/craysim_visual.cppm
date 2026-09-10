@@ -82,7 +82,10 @@ export namespace craysim
         show_movenum,     // If true, show the current movement counter in the fps_label
         move_by_flying,   // If false, then hug the landscape (whether movement is by key, api or whatever); if true, fly
         eye_is_hex,       // If true, the glTF encoded a file with .heye suffix (instead of .eye) indicating it is hexagonally arranged.
-        can_exit          // If set, program can exit now
+        can_exit,         // If set, program can exit now
+        skip_raycasting   // If true, skip the compound-ray renderFrame() calls (and the ommatidia data readback
+                          // that depends on them) entirely, for client code that doesn't consume the rendered
+                          // eye/camera data. compound-ray is still used for gltf parsing either way.
     };
 
     // craysim::parse_inputs returns this struct
@@ -1841,7 +1844,7 @@ export namespace craysim
                 this->agent_collision_distances.resize (this->n_collision_distances, {});
             }
 
-            std::uint32_t up_to = 10; // Have space for ~50, but depends on roll/pitch/yaw of camera
+            std::uint32_t up_to = 20; // Have space for ~50, but depends on roll/pitch/yaw of camera
 
             if (this->sim_opts.test (craysim::options::visualize_collisions)) {
                 this->clear_collisvis();
@@ -1937,51 +1940,56 @@ export namespace craysim
                 // std::cout << "Closest safe distance: " << this->get_closest_collision_distance_str() << std::endl;
             }
 
-            auto cam_pre_rand = sm::mat<float, 4>::identity();
-            // If requested, add uncertainty in the pitch/roll/yaw for the image here, in a way that
-            // does not affect the agent's movement.
-            if (this->rotation_uncertainty_degrees.sum() > 0.0f) {
-                sm::mat<float, 4> rr = this->random_rotation();
-                cam_pre_rand = craysim::compoundray::getCameraSpace (scene);
-                this->set_camera_pose (cam_pre_rand * rr); // rotate camera by rr
-            }
-
-            std::uint32_t camidx = 0;
-            // Call the compound-ray ray casting method to recompute the compound-eye view of the scene
-            renderFrame();
-
-            // If necessary, restore camera rotation
-            if (this->rotation_uncertainty_degrees.sum() > 0.0f) { this->set_camera_pose (cam_pre_rand); }
-
-            // Access data so that a brain model could be fed
-            if (isCompoundEyeActive()) {
-                camidx = scene->getCameraIndex();
-                getCameraData (this->ommatidia_datas[camidx]);
-                this->ommatidias[camidx] = &scene->m_ommVecs[camidx];
-
-                // if csv mode, then save the data (camidx 0 only)
-                if (camidx == 0 && this->sim_opts.all_of ({craysim::options::path_from_csv, craysim::options::save_hdf5})
-                    && this->csv_positions.size() > this->move_counter) {
-                    std::cout << "Saving frame...\n";
-                    std::string ommframe = "/ommatidia_data/frame_" + std::to_string (this->move_counter);
-                    try {
-                        record.add_contained_vals (ommframe.c_str(), this->ommatidia_datas[camidx]);
-                    } catch (const std::exception& e) {} // Probably didn't move this time.
+            // Call the compound-ray ray casting method to recompute the compound-eye view of the
+            // scene, and read back the resulting ommatidia data -- skippable in its entirety via
+            // skip_raycasting for client code that never consumes that data (compound-ray is still
+            // used for gltf parsing regardless of this flag).
+            if (!this->sim_opts.test (craysim::options::skip_raycasting)) {
+                auto cam_pre_rand = sm::mat<float, 4>::identity();
+                // If requested, add uncertainty in the pitch/roll/yaw for the image here, in a way that
+                // does not affect the agent's movement.
+                if (this->rotation_uncertainty_degrees.sum() > 0.0f) {
+                    sm::mat<float, 4> rr = this->random_rotation();
+                    cam_pre_rand = craysim::compoundray::getCameraSpace (scene);
+                    this->set_camera_pose (cam_pre_rand * rr); // rotate camera by rr
                 }
-            }
 
-            // Render any other compound eyes in the scene
-            if (this->ommatidia_datas.size() > 1) {
-                nextCamera();
-                std::uint32_t _camidx = scene->getCameraIndex();
-                while (_camidx != camidx) {
-                    renderFrame();
-                    if (isCompoundEyeActive()) {
-                        getCameraData (this->ommatidia_datas[_camidx]);
-                        this->ommatidias[_camidx] = &scene->m_ommVecs[_camidx];
+                std::uint32_t camidx = 0;
+                renderFrame();
+
+                // If necessary, restore camera rotation
+                if (this->rotation_uncertainty_degrees.sum() > 0.0f) { this->set_camera_pose (cam_pre_rand); }
+
+                // Access data so that a brain model could be fed
+                if (isCompoundEyeActive()) {
+                    camidx = scene->getCameraIndex();
+                    getCameraData (this->ommatidia_datas[camidx]);
+                    this->ommatidias[camidx] = &scene->m_ommVecs[camidx];
+
+                    // if csv mode, then save the data (camidx 0 only)
+                    if (camidx == 0 && this->sim_opts.all_of ({craysim::options::path_from_csv, craysim::options::save_hdf5})
+                        && this->csv_positions.size() > this->move_counter) {
+                        std::cout << "Saving frame...\n";
+                        std::string ommframe = "/ommatidia_data/frame_" + std::to_string (this->move_counter);
+                        try {
+                            record.add_contained_vals (ommframe.c_str(), this->ommatidia_datas[camidx]);
+                        } catch (const std::exception& e) {} // Probably didn't move this time.
                     }
+                }
+
+                // Render any other compound eyes in the scene
+                if (this->ommatidia_datas.size() > 1) {
                     nextCamera();
-                    _camidx = scene->getCameraIndex();
+                    std::uint32_t _camidx = scene->getCameraIndex();
+                    while (_camidx != camidx) {
+                        renderFrame();
+                        if (isCompoundEyeActive()) {
+                            getCameraData (this->ommatidia_datas[_camidx]);
+                            this->ommatidias[_camidx] = &scene->m_ommVecs[_camidx];
+                        }
+                        nextCamera();
+                        _camidx = scene->getCameraIndex();
+                    }
                 }
             }
 
