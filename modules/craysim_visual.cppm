@@ -1565,8 +1565,23 @@ export namespace craysim
         // How many fast renders to wait until we re-render the slow windows?
         std::uint64_t slow_every = 10u;
 
-        // Time const for frames.
+        // Time const for frames -- how much SIMULATED time this frame represents (scales
+        // agent movement distance, decision-interval timing, etc. throughout antmin.cpp).
+        // Deliberately NOT the same variable used for real-world frame pacing below
+        // (wallclock_dt) -- see that member's own comment for why: they used to be the
+        // same value, which meant a "simulation speed" control that scaled frame_tau just
+        // changed step granularity (bigger discrete jumps, taking proportionally longer in
+        // real time too) rather than genuinely speeding up or slowing down the simulation
+        // relative to wall-clock time.
         double frame_tau = 0.0167;
+
+        // Real-world (wall-clock) seconds to wait() between frames -- see render_and_poll()
+        // below. Fixed, independent of frame_tau: this is what makes Ctrl+f/Ctrl+g (see
+        // craysim_visual's own key_callback_extra) a genuine simulation-speed control rather
+        // than just a step-size/discretisation change. Same default frame_tau started at
+        // (0.0167s, ~60fps) since that's the intended real-time pacing target regardless of
+        // how fast/slow the simulated agent itself is currently set to move.
+        double wallclock_dt = 0.0167;
 
         sm::mat<float, 4> random_rotation()
         {
@@ -1873,7 +1888,9 @@ export namespace craysim
             if (this->move_counter % this->fps_label_update_period == 0) { this->fps_label_update(); }
 
             // Save some electricity while developing - limit to 60 FPS. For max speed use this->poll() (-x)
-            if (this->sim_opts.test (craysim::options::max_fps)) { this->poll(); } else { this->wait (this->frame_tau); }
+            // Waits wallclock_dt (real seconds), NOT frame_tau (simulated seconds) -- see
+            // wallclock_dt's own comment above for why they're deliberately different now.
+            if (this->sim_opts.test (craysim::options::max_fps)) { this->poll(); } else { this->wait (this->wallclock_dt); }
 
             // Render the other windows
             if ((this->render_counter % this->slow_every) == 0u) {
@@ -2510,6 +2527,26 @@ export namespace craysim
                     // walk
                     std::cout << "Flip walk\n";
                     this->vstate.flip (state::walk);
+                } else if (key == mplot::key::g && (mods & mplot::keymod::control)) {
+                    // Simulation speed down. Ctrl+p and Ctrl+l/Ctrl+y/Ctrl+h were all tried and
+                    // rejected first -- each already has an existing, unrelated meaning (base
+                    // VisualOwnable's FOV/projection-toggle/help-text controls, or this file's
+                    // own move_sense::up/down) that would fire alongside this one. Ctrl+f/Ctrl+g
+                    // are unused by either this file or VisualOwnable, bare or with Ctrl.
+                    //
+                    // Scales frame_tau (simulated time per frame), not wallclock_dt (real-time
+                    // frame pacing, see that member's own comment) -- this is what makes this a
+                    // GENUINE speed change rather than just a step-size/discretisation change:
+                    // the agent now covers less simulated distance per the SAME real-world frame
+                    // duration, not a smaller step taken proportionally more often in real time.
+                    // Halve/double (not a finer step) to match this file's own kcmd_speed
+                    // End/Home precedent above.
+                    this->frame_tau *= 0.5;
+                    std::cout << "Simulation speed halved: frame_tau=" << this->frame_tau << std::endl;
+                } else if (key == mplot::key::f && (mods & mplot::keymod::control)) {
+                    // Simulation speed up -- see Ctrl+g case just above.
+                    this->frame_tau *= 2.0;
+                    std::cout << "Simulation speed doubled: frame_tau=" << this->frame_tau << std::endl;
                 } else if (key == mplot::key::c) {
                     this->vstate.flip (state::show_camframe);
                 } else if (key == mplot::key::e) {
