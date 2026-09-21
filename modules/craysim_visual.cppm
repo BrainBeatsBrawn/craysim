@@ -65,10 +65,10 @@ export namespace craysim
         path_from_csv,    // Move the agent from a pre-defined sequence of 2D coordinates that give it a path
         csv_in_plane,     // If true, then csv playback is 2-dimensional. User has to provide the 'altitude' for the agent
         save_csv_positions, // Write out the actual 3D positions that the CSV found on the landscape out to a file
-        api_movement,     // Client code sets a vec/quat or mat for movement in the next render_and_poll()
-        homing_mode,      // A flag for a 'go home' mode. It's up to client code to decide what to do with this.
+        api_movement,     // Client code sets a vec/quat or mat for movement in the next render_and_poll() (state?)
+        homing_mode,      // A flag for a 'go home' mode. It's up to client code to decide what to do with this. (state?)
         have_film_director, // user passed a json config file for film direction
-        making_movie,     // If true, we're making a movie
+        making_movie,     // If true, we're making a movie (state?)
         no_follow_agent,  // If true DON'T follow the agent (for some movies, this is useful)
         breadcrumbs_csv,   // If true, show breadcrumbs for csv-specified movements
         breadcrumbs_keymv, // If true, show breadcrumbs for key-commanded movements
@@ -1886,9 +1886,12 @@ export namespace craysim
             // walk/csv playback/check keys for movement command
             if (this->vstate.test (craysim::visual<glver>::state::paused) == false) {
 
+                std::cout << "Not paused.\n";
                 if (this->vstate.test (craysim::visual<glver>::state::walk)) {
                     this->walk();
-                } else if (this->sim_opts.test (craysim::options::path_from_csv) && this->csv_positions.size() > this->move_counter) {
+                } else if (this->sim_opts.test (craysim::options::path_from_csv)
+                           && this->vstate.test (state::free_movement) == false
+                           && this->csv_positions.size() > this->move_counter) {
                     // Construct path from csv file of 2D agent locations
                     if (this->csv_playback() == false && this->sim_opts.test (craysim::options::making_movie)) {
                         // In movie mode, finish as soon as the movie is made
@@ -1897,6 +1900,7 @@ export namespace craysim
                     this->target_move_counter++;
 
                 } else if (this->sim_opts.test (craysim::options::path_from_csv)
+                           && this->vstate.test (state::free_movement) == false
                            && this->csv_positions.size() <= this->move_counter
                            && this->sim_opts.test (craysim::options::making_movie)) {
                     std::cout << "Ran out of moves making movies, signal to quit\n";
@@ -1911,11 +1915,19 @@ export namespace craysim
                 }
             } else if (this->vstate.test (craysim::visual<glver>::state::paused) == true
                        && this->sim_opts.any_of ({craysim::options::api_movement, craysim::options::homing_mode})) {
+                std::cout << "Paused and API/homing mode.\n";
                 this->api_rotate(); // BUT don't inc move counter! This enables rotating while paused
             } else if (this->vstate.test (craysim::visual<glver>::state::paused) == true
                        && this->sim_opts.test (craysim::options::path_from_csv)
+                       && this->vstate.test (state::free_movement) == false
                        && this->csv_positions.size() > this->move_counter) {
+                std::cout << "Paused and path_from_csv mode and csv_positions size > move_counter.\n";
                 this->csv_playback();
+            } else if (this->vstate.test (state::free_movement)) {
+                std::cout << "Key move for free movement.\n";
+                this->key_move (this->fps_profiler.fps_mean);
+            } else {
+                std::cout << "Paused, but unhandled case.\n";
             }
 
             // Having moved, if we need to, we can re-compute the distance to any non-landscape objects that we might collide with.
@@ -2276,6 +2288,7 @@ export namespace craysim
             show_camframe,         // Show camera axes?
             show_compass,          // Show compass axes?
             paused,                // Pause sim (i.e. pause time)?
+            free_movement,         // Allows user to move manually within a csv_playback. Set paused, then go into free_movement to enable normal key-based moves.
             stepfwd,               // If true and if paused is true, step forward one timestep in the camera input
             walk,                  // If true, do a random walk
             freeze                 // Freeze movement
@@ -2378,8 +2391,8 @@ export namespace craysim
             if ((action == mplot::keyaction::press || action == mplot::keyaction::repeat)
                 && !(mods & mplot::keymod::shift)) {
 
-                if (this->sim_opts.test (craysim::options::path_from_csv)) {
-                    // In CSV playback, keys are fwd/reverse/pause
+                if (this->sim_opts.test (craysim::options::path_from_csv) && this->vstate.test (state::free_movement) == false) {
+                    // In CSV playback, keys are fwd/reverse(when not paused)/pause and when paused, movement as normal
                     if (key == mplot::key::up) {
                         // forwards
                         this->target_move_counter += 1;
@@ -2396,40 +2409,28 @@ export namespace craysim
                 } else {
                     if (action != mplot::keyaction::repeat) {
                         if (key == mplot::key::w) {
-                            this->vstate.reset (state::paused);
                             this->move_state.set (move_sense::forward);
                         } else if (key == mplot::key::a && !mods) {
-                            this->vstate.reset (state::paused);
                             this->move_state.set (move_sense::left);
                         } else if (key == mplot::key::d) {
-                            this->vstate.reset (state::paused);
                             this->move_state.set (move_sense::right);
                         } else if (key == mplot::key::s) {
-                            this->vstate.reset (state::paused);
                             this->move_state.set (move_sense::backward);
                         } else if (key == mplot::key::p) {
-                            this->vstate.reset (state::paused);
                             this->move_state.set (move_sense::up);
                         } else if (key == mplot::key::l) {
-                            this->vstate.reset (state::paused);
                             this->move_state.set (move_sense::down);
                         } else if (key == mplot::key::up) {
-                            this->vstate.reset (state::paused);
                             this->move_state.set (move_sense::rot_up);
                         } else if (key == mplot::key::down) {
-                            this->vstate.reset (state::paused);
                             this->move_state.set (move_sense::rot_down);
                         } else if (key == mplot::key::left) {
-                            this->vstate.reset (state::paused);
                             this->move_state.set (move_sense::rot_left);
                         } else if (key == mplot::key::right) {
-                            this->vstate.reset (state::paused);
                             this->move_state.set (move_sense::rot_right);
                         } else if (key == mplot::key::comma) {
-                            this->vstate.reset (state::paused);
                             this->move_state.set (move_sense::rot_roll_left);
                         } else if (key == mplot::key::period) {
-                            this->vstate.reset (state::paused);
                             this->move_state.set (move_sense::rot_roll_right);
                         }
                     }
@@ -2454,7 +2455,7 @@ export namespace craysim
                 }
             } else if (action == mplot::keyaction::release && !(mods & mplot::keymod::shift)) {
 
-                if (this->sim_opts.test (craysim::options::path_from_csv)) {
+                if (this->sim_opts.test (craysim::options::path_from_csv) && this->vstate.test (state::free_movement) == false) {
                     // Nothing to do
                 } else {
                     if (key == mplot::key::w) {
@@ -2495,6 +2496,11 @@ export namespace craysim
                     this->vstate.flip (state::walk);
                 } else if (key == mplot::key::c) {
                     this->vstate.flip (state::show_camframe);
+                } else if (key == mplot::key::k) {
+                    this->vstate.flip (state::free_movement);
+                    if (this->vstate.test (state::free_movement)) {
+                        std::cout << "Free movement mode (keys should cause agent movement)\n";
+                    }
                 } else if (key == mplot::key::e) {
                     this->vstate.flip (state::show_compass);
                 } else if (key == mplot::key::o) {
@@ -2505,10 +2511,13 @@ export namespace craysim
                     this->stop();
 
                 } else if (key == mplot::key::f && this->vstate.test (state::paused)) {
-                    this->vstate.set (state::stepfwd);
+                    this->vstate.set (state::stepfwd); // no longer used, I think, unless by Alex?
 
                 } else if (key == mplot::key::space) {
                     this->vstate.flip (state::paused);
+                    if (this->vstate.test (state::paused) == false) {
+                        this->vstate.set (state::free_movement, false);
+                    }
 
                 } else if (key == mplot::key::n0) {
                     sim_opts.flip (craysim::options::visualize_collisions);
