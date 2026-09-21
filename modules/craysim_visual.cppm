@@ -2289,6 +2289,7 @@ export namespace craysim
             show_compass,          // Show compass axes?
             paused,                // Pause sim (i.e. pause time)?
             free_movement,         // Allows user to move manually within a csv_playback. Set paused, then go into free_movement to enable normal key-based moves.
+            free_movement_set,     // Set true after going into free movement mode. Allows client code to act.
             stepfwd,               // If true and if paused is true, step forward one timestep in the camera input
             walk,                  // If true, do a random walk
             freeze                 // Freeze movement
@@ -2500,6 +2501,7 @@ export namespace craysim
                     this->vstate.flip (state::free_movement);
                     if (this->vstate.test (state::free_movement)) {
                         std::cout << "Free movement mode (keys should cause agent movement)\n";
+                        this->vstate.set (state::free_movement_set);
                     }
                 } else if (key == mplot::key::e) {
                     this->vstate.flip (state::show_compass);
