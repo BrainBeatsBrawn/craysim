@@ -1886,7 +1886,6 @@ export namespace craysim
             // walk/csv playback/check keys for movement command
             if (this->vstate.test (craysim::visual<glver>::state::paused) == false) {
 
-                std::cout << "Not paused.\n";
                 if (this->vstate.test (craysim::visual<glver>::state::walk)) {
                     this->walk();
                 } else if (this->sim_opts.test (craysim::options::path_from_csv)
@@ -1915,20 +1914,15 @@ export namespace craysim
                 }
             } else if (this->vstate.test (craysim::visual<glver>::state::paused) == true
                        && this->sim_opts.any_of ({craysim::options::api_movement, craysim::options::homing_mode})) {
-                std::cout << "Paused and API/homing mode.\n";
                 this->api_rotate(); // BUT don't inc move counter! This enables rotating while paused
             } else if (this->vstate.test (craysim::visual<glver>::state::paused) == true
                        && this->sim_opts.test (craysim::options::path_from_csv)
                        && this->vstate.test (state::free_movement) == false
                        && this->csv_positions.size() > this->move_counter) {
-                std::cout << "Paused and path_from_csv mode and csv_positions size > move_counter.\n";
                 this->csv_playback();
             } else if (this->vstate.test (state::free_movement)) {
-                std::cout << "Key move for free movement.\n";
                 this->key_move (this->fps_profiler.fps_mean);
-            } else {
-                std::cout << "Paused, but unhandled case.\n";
-            }
+            } // else paused, unhandled case
 
             // Having moved, if we need to, we can re-compute the distance to any non-landscape objects that we might collide with.
             if (this->sim_opts.test (craysim::options::find_collisions)
