@@ -8,7 +8,6 @@ module;
 
 // CompoundRay include files (*not* part of mathplot)
 #include <MulticamScene.h>
-#include <libEyeRenderer.h>
 #include <cuda/BufferView.h>
 #include <sutil/Matrix.h>
 
@@ -58,10 +57,10 @@ export namespace craysim::compoundray
      * VisualModels in the mplot::Visual
      */
     template<int glver = mplot::gl::version_4_1>
-    void scene_to_visualmodels (MulticamScene* thescene, mplot::Visual<glver>* thevisual, bool make_navmeshes = false)
+    void scene_to_visualmodels (cray::MulticamScene* thescene, mplot::Visual<glver>* thevisual, bool make_navmeshes = false)
     {
         static constexpr bool debug_meshload = false;
-        std::vector<std::shared_ptr<MulticamScene::MeshGroup>> mymeshes = thescene->getMeshes();
+        std::vector<std::shared_ptr<cray::MulticamScene::MeshGroup>> mymeshes = thescene->getMeshes();
         std::vector<MaterialData::Pbr> mymats = thescene->getMaterials();
         for (unsigned int mi = 0; mi < mymeshes.size(); ++mi) {
             sm::mat<float, 4> tfm;
@@ -161,7 +160,7 @@ export namespace craysim::compoundray
     }
 
     // From the camera localspace, we can create a matrix which specifies a camera pose within the world frame
-    sm::mat<float, 4> getCameraSpace (const MulticamScene* thescene)
+    sm::mat<float, 4> getCameraSpace (const cray::MulticamScene* thescene)
     {
         sm::mat<float, 4> camera_space = sm::mat<float, 4>::identity();
 

@@ -231,7 +231,7 @@ export namespace craysim
         std::int32_t samples_per_omm_default = 64;
 
         // The compound-ray scene
-        /*cray::*/MulticamScene scene;
+        cray::MulticamScene scene;
 
         visual (std::int32_t width, std::int32_t height, const std::string& title, craysim::parsed_inputs& prog_opts,
                 const std::int32_t samples_default = 64, const float _agent_gamma = 1.0f)
@@ -1992,7 +1992,7 @@ export namespace craysim
         void complete_recording()
         {
             if (this->sim_opts.all_of ({craysim::options::path_from_csv, craysim::options::save_hdf5})) {
-                // convert std::vector<Ommatidium>* ommatidia into vvecs that can be h5 saved
+                // convert std::vector<cray::Ommatidium>* ommatidia into vvecs that can be h5 saved
                 auto ommat = this->get_ommatidia_ptr(0);
                 sm::vvec<sm::vec<float, 3>> o_pos;
                 sm::vvec<sm::vec<float, 3>> o_dir;
@@ -2146,7 +2146,7 @@ export namespace craysim
         std::map<std::uint32_t, oces::reader> oces_reader;
         // Required in every craysim, I think. craysim::state? member of craysim::visual?
         std::map<std::uint32_t, std::vector<std::array<float, 3>>> ommatidia_datas;
-        std::map<std::uint32_t, std::vector<Ommatidium>*> ommatidias;
+        std::map<std::uint32_t, std::vector<cray::Ommatidium>*> ommatidias;
         // We keep a track of the eye size for each compound ray camera. Used in detect_camera_changes
         std::map<std::uint32_t, std::size_t> last_eye_size;
         // An mplot::VisualModel of the compound-ray eye. This is the eye in the scene. Store one
