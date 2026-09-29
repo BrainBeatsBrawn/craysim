@@ -14,10 +14,6 @@ module;
 #include <expected>
 
 #include <MulticamScene.h>
-#include <libEyeRenderer.h> // getCurrentEyeSamplesPerOmmatidium
-
-// scene exists at global scope in libEyeRenderer.so
-extern MulticamScene* scene;
 
 export module craysim.visual;
 
@@ -234,15 +230,15 @@ export namespace craysim
         // When the program starts, how many samples per ommatidium/element do you want?
         std::int32_t samples_per_omm_default = 64;
 
+        // The compound-ray scene
+        cray::MulticamScene scene;
+
         visual (std::int32_t width, std::int32_t height, const std::string& title, craysim::parsed_inputs& prog_opts,
                 const std::int32_t samples_default = 64, const float _agent_gamma = 1.0f)
             : mplot::Visual<glver> (width, height, title)
         {
             this->sim_opts = prog_opts.opts;
             this->sim_opts.set (craysim::options::making_movie, prog_opts.make_movie);
-
-            // Boilerplate memory alloc for compound-ray and turn off verbose logging.
-            multicamAlloc(); setVerbosity (false);
 
             this->lightingEffects (true);
             // Use a non-default zFar as we are likely to use large environments
@@ -312,11 +308,7 @@ export namespace craysim
             this->setSceneRotation (sm::quaternion<float>{ 0.93f, 0.16f, -0.32f, -0.056f });
         }
 
-        ~visual()
-        {
-            stop(); // stop compound-ray from running
-            multicamDealloc(); // De-allocate compound-ray memory
-        }
+        ~visual() {}
 
         void load (const std::string& gltfpath)
         {
@@ -326,20 +318,20 @@ export namespace craysim
             std::cout << "Loading glTF file \"" << this->path << "\"..." << std::endl;
             mplot::tools::stripUnixFile (this->basepath);
             std::cout << "glTF dir: " << this->basepath << std::endl;
-            loadGlTFscene (this->path.c_str(), (this->sim_opts.test (craysim::options::blender_axes)
-                                                ? craysim::compoundray::blender_transform() : sutil::Matrix4x4::identity()));
+            this->scene.loadGlTFscene (this->path.c_str(), (this->sim_opts.test (craysim::options::blender_axes)
+                                                            ? craysim::compoundray::blender_transform() : sutil::Matrix4x4::identity()));
             // Get the visual models from the scene
-            craysim::compoundray::scene_to_visualmodels<glver> (scene, this, false); // true for 'make_navmeshes'
+            craysim::compoundray::scene_to_visualmodels<glver> (&this->scene, this, false); // true for 'make_navmeshes'
         }
 
         void setup_camera()
         {
             // We get the eye data path from the glTF file
-            std::int32_t ncam = static_cast<std::int32_t>(getCameraCount());
+            std::int32_t ncam = static_cast<std::int32_t>(this->scene.getCameraCount());
             std::int32_t my_compound_camera = -1;
             for (std::int32_t ci = 0; ci < ncam; ++ci) {
-                gotoCamera (ci);
-                this->efpaths[ci] = getEyeDataPath();
+                this->scene.setCurrentCamera (ci);
+                this->efpaths[ci] = this->scene.getEyeDataPath();
                 if (!this->efpaths[ci].empty()) {
                     my_compound_camera = ci;
                     std::cout << "my_compound_camera = " << my_compound_camera
@@ -353,36 +345,36 @@ export namespace craysim
 
             // Now switch to each compound ray camera and set the samples per ommatidium/element
             if (my_compound_camera != -1) {
-                gotoCamera (0);
-                std::int32_t csamp = getCurrentEyeSamplesPerOmmatidium();
+                this->scene.setCurrentCamera (0);
+                std::int32_t csamp = this->scene.getCurrentEyeSamplesPerOmmatidium();
                 std::cout << "Current eye samples per ommatidium for camera 0 is " << csamp << std::endl;
-                if (csamp < 32000) { changeCurrentEyeSamplesPerOmmatidiumBy (samples_per_omm_default - csamp); }
+                if (csamp < 32000) { this->scene.changeCurrentEyeSamplesPerOmmatidiumBy (samples_per_omm_default - csamp); }
                 // Set samples for other compound eyes in the scene
-                nextCamera();
-                std::uint32_t _camidx = scene->getCameraIndex();
+                this->scene.nextCamera();
+                std::uint32_t _camidx = this->scene.getCameraIndex();
                 while (_camidx != 0) {
-                    csamp = getCurrentEyeSamplesPerOmmatidium();
+                    csamp = this->scene.getCurrentEyeSamplesPerOmmatidium();
                     std::cout << "Current eye samples per ommatidium for camera " << _camidx << " is " << csamp << std::endl;
-                    if (csamp < 32000) { changeCurrentEyeSamplesPerOmmatidiumBy (samples_per_omm_default - csamp); }
-                    nextCamera();
-                    _camidx = scene->getCameraIndex();
+                    if (csamp < 32000) { this->scene.changeCurrentEyeSamplesPerOmmatidiumBy (samples_per_omm_default - csamp); }
+                    this->scene.nextCamera();
+                    _camidx = this->scene.getCameraIndex();
                 }
             }
         }
 
         void set_samples_per_ommatidium (const std::int32_t samples)
         {
-            gotoCamera (0);
-            std::uint32_t _camidx = scene->getCameraIndex();
+            this->scene.setCurrentCamera (0);
+            std::uint32_t _camidx = this->scene.getCameraIndex();
             if (_camidx == 0) {
                 std::cout << "Can't set samples per ommatidium; no camera yet\n";
             }
             while (_camidx != 0) {
-                std::int32_t csamp = getCurrentEyeSamplesPerOmmatidium();
+                std::int32_t csamp = this->scene.getCurrentEyeSamplesPerOmmatidium();
                 std::cout << "Current eye samples per ommatidium for camera " << _camidx << " is " << csamp << std::endl;
-                setCurrentEyeSamplesPerOmmatidium (samples);
-                nextCamera();
-                _camidx = scene->getCameraIndex();
+                this->scene.setCurrentEyeSamplesPerOmmatidium (samples);
+                this->scene.nextCamera();
+                _camidx = this->scene.getCameraIndex();
             }
         }
 
@@ -419,7 +411,7 @@ export namespace craysim
             // We get the initial camera localspace. This also serves to reset the camera pose. This
             // is set in the GLTF file and note that it may be a LEFT HANDED coordinate system! We
             // update this if we have a landscape, and it is updated to the first pose 'on the land'
-            sm::mat<float, 4> ics = craysim::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> ics = craysim::compoundray::getCameraSpace (&this->scene);
             this->initial_camera_space.translate (ics.translation()); // Right handed
 
             // Create an EyeVisual 'eye' in our scene just for camera 0
@@ -715,7 +707,7 @@ export namespace craysim
 
             std::cout << "Landscape name: " << this->land->name << " was found [" << (land->vpos_size() / 3) << " vertices]\n";
             this->land_to_scene = land->getViewMatrix();
-            sm::mat<float, 4> camspace = craysim::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> camspace = craysim::compoundray::getCameraSpace (&this->scene);
 
             if (this->sim_opts.test (craysim::options::path_from_csv) && !this->csv_positions.empty()) {
                 this->init_path_from_csv();
@@ -747,7 +739,7 @@ export namespace craysim
                 std::cout << "Failed to find the landscape; Camera position unchanged from glTF/CSV\n";
             }
 
-            sm::mat<float, 4> _cam_to_scene = craysim::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> _cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
             std::cout << "Got camera pose matrix from scene:\n" << _cam_to_scene << std::endl;
             sm::vec<float> _lastloc = _cam_to_scene.translation();
 
@@ -770,7 +762,7 @@ export namespace craysim
                     this->init_path_from_csv();
                 }
 
-                sm::mat<float, 4> camspace = craysim::compoundray::getCameraSpace (scene);
+                sm::mat<float, 4> camspace = craysim::compoundray::getCameraSpace (&this->scene);
                 sm::vec<float> camloc_mf = (this->land_to_scene.inverse() * camspace * sm::vec<float>{}).less_one_dim();
                 auto[hp_scene, _ti0] = this->land->navmesh->find_triangle_hit (this->land_to_scene, camloc_mf, this->scene_up * -100.0f);
                 cam_to_scene = this->land->navmesh->position_camera (hp_scene, this->land_to_scene, this->hoverheight);
@@ -787,14 +779,14 @@ export namespace craysim
         // Detect changes in the compound-ray camera, and update all our EyeVisuals accordingly
         void detect_camera_changes()
         {
-            std::uint32_t camidx = scene->getCameraIndex();
+            std::uint32_t camidx = this->scene.getCameraIndex();
             std::uint32_t camidx_start = camidx;
             do {
                 // Detect changes for compound ray camera camidx...
                 if (this->last_eye_size.contains (camidx) == false) { this->last_eye_size[camidx] = 0u; }
 
                 if (this->ommatidia_datas[camidx].size() == 0) {
-                    if (isCompoundEyeActive()) { getCameraData (this->ommatidia_datas[camidx]); }
+                    if (this->scene.isCompoundEyeActive()) { this->scene.getCameraData (this->ommatidia_datas[camidx]); }
                 }
 
                 if (this->eyes.contains (camidx) == true) {
@@ -822,15 +814,15 @@ export namespace craysim
                         }
                     }
                 }
-                nextCamera();
-                camidx = scene->getCameraIndex();
+                this->scene.nextCamera();
+                camidx = this->scene.getCameraIndex();
             } while (camidx != camidx_start);
         }
 
         // Has the camera rotated since the last ime step? Returns true if rotation in any plane is greater than the threshold.
         bool camera_has_rotated (float rotation_threshold_rad = 0.01745f) // default threshold of ~1 degree
         {
-            sm::mat<float, 4> curr_cam_to_scene = craysim::compoundray::getCameraSpace(scene);
+            sm::mat<float, 4> curr_cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
 
             // If this is the first call, just store and return false
             if (tm1_cam_to_scene[0] == std::numeric_limits<float>::max()) {
@@ -868,7 +860,7 @@ export namespace craysim
         sm::mat<float, 4> get_compass_matrix ()
         {
             // Project camera forward (z-axis) onto the y=0 ground plane to get heading direction
-            sm::mat<float,4> cam_to_scene = craysim::compoundray::getCameraSpace(scene);
+            sm::mat<float,4> cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
             // Vector pointing in the camera's forward direction, defined as the z direction in the camera's frame
             sm::vec<float> cam_z = cam_to_scene.col(2).less_one_dim();
             cam_z.renormalize();
@@ -888,7 +880,7 @@ export namespace craysim
         float get_compass_heading_rad() const
         {
             // What's the orientation of cam_to_scene wrt to scene? It's just the rotation of cam_to_scene.
-            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
             // Offset cam_to_scene back to origin
             cam_to_scene.pretranslate (-cam_to_scene.translation());
             // The camera's forwards direction is its z axis
@@ -965,12 +957,12 @@ export namespace craysim
         // A rotation only api
         void api_rotate()
         {
-            rotateCamerasLocallyAround (this->api_cam_rotn_angle,
-                                        this->api_cam_rotn_axis[0],
-                                        this->api_cam_rotn_axis[1],
-                                        this->api_cam_rotn_axis[2]);
+            this->scene.rotateCamerasLocallyAround (this->api_cam_rotn_angle,
+                                                    this->api_cam_rotn_axis[0],
+                                                    this->api_cam_rotn_axis[1],
+                                                    this->api_cam_rotn_axis[2]);
 
-            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
 
             for (auto& eye : this->eyes) { if (eye.second != nullptr) { eye.second->setViewMatrix (cam_to_scene); } }
             if (this->agent_body != nullptr) { this->agent_body->setViewMatrix (cam_to_scene); }
@@ -980,13 +972,13 @@ export namespace craysim
         void api_move_over_land()
         {
             // Check vec/quat/matrix and then make mv_camframe
-            rotateCamerasLocallyAround (this->api_cam_rotn_angle,
-                                        this->api_cam_rotn_axis[0],
-                                        this->api_cam_rotn_axis[1],
-                                        this->api_cam_rotn_axis[2]);
+            this->scene.rotateCamerasLocallyAround (this->api_cam_rotn_angle,
+                                                    this->api_cam_rotn_axis[0],
+                                                    this->api_cam_rotn_axis[1],
+                                                    this->api_cam_rotn_axis[2]);
             this->instantaneous_rotation = true;
 
-            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
 
             // move by this->api_cam_mv; along z (for now?)
             sm::vec<float> mv_camframe = this->api_cam_mv;
@@ -1049,13 +1041,13 @@ export namespace craysim
         void api_move_flying ()
         {
             // Check vec/quat/matrix and then make mv_camframe
-            rotateCamerasLocallyAround (this->api_cam_rotn_angle,
-                                        this->api_cam_rotn_axis[0],
-                                        this->api_cam_rotn_axis[1],
-                                        this->api_cam_rotn_axis[2]);
+            this->scene.rotateCamerasLocallyAround (this->api_cam_rotn_angle,
+                                                    this->api_cam_rotn_axis[0],
+                                                    this->api_cam_rotn_axis[1],
+                                                    this->api_cam_rotn_axis[2]);
             this->instantaneous_rotation = true;
 
-            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
 
             // move by this->api_cam_mv; along z (for now?)
             sm::vec<float> mv_camframe = this->api_cam_mv;
@@ -1114,12 +1106,12 @@ export namespace craysim
         // Set camera pose for all cameras. This expects that ti0 is correctly set for the hit point of cam_to_scene through the landscape.
         void set_camera_pose (const sm::mat<float, 4>& cam_to_scene)
         {
-            std::uint32_t camidx = scene->getCameraIndex();
+            std::uint32_t camidx = this->scene.getCameraIndex();
             std::uint32_t camidx_start = camidx;
             do {
-                setCameraPoseMatrix (craysim::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
-                nextCamera();
-                camidx = scene->getCameraIndex();
+                this->scene.setCameraPoseMatrix (craysim::compoundray::mat44_to_Matrix4x4 (cam_to_scene));
+                this->scene.nextCamera();
+                camidx = this->scene.getCameraIndex();
             } while (camidx != camidx_start);
         }
 
@@ -1134,16 +1126,16 @@ export namespace craysim
 
         void key_move_flying (const float fps)
         {
-            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
             if (this->is_actively_rotating()) {
                 this->instantaneous_rotation = true;
                 // Up-down (pitch) is rotation about local camera frame axis x
-                rotateCamerasLocallyAround (this->get_vertical_rotation_angle(), 1.0f, 0.0f, 0.0f);
+                this->scene.rotateCamerasLocallyAround (this->get_vertical_rotation_angle(), 1.0f, 0.0f, 0.0f);
                 // Left-and-right (yaw) is rotation about local camera frame axis y
-                rotateCamerasLocallyAround (this->get_horizontal_rotation_angle(), 0.0f, 1.0f, 0.0f);
+                this->scene.rotateCamerasLocallyAround (this->get_horizontal_rotation_angle(), 0.0f, 1.0f, 0.0f);
                 // Roll
-                rotateCamerasLocallyAround (this->get_roll_rotation_angle(), 0.0f, 0.0f, 1.0f);
-                cam_to_scene = craysim::compoundray::getCameraSpace (scene); // update
+                this->scene.rotateCamerasLocallyAround (this->get_roll_rotation_angle(), 0.0f, 0.0f, 1.0f);
+                cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene); // update
             }
             if (this->is_actively_translating()) {
                 // Simpler than key_move_over_landscape
@@ -1168,21 +1160,21 @@ export namespace craysim
         // Make a keyboard based movement over the landscape
         void key_move_over_land (const float fps)
         {
-            if (isCompoundEyeActive()) { // FIXME: I don't think this stanza is necessary here.
-                auto _camidx = scene->getCameraIndex();
-                this->ommatidias[_camidx] = &scene->m_ommVecs[_camidx];
+            if (this->scene.isCompoundEyeActive()) { // FIXME: I don't think this stanza is necessary here.
+                auto _camidx = this->scene.getCameraIndex();
+                this->ommatidias[_camidx] = &this->scene.m_ommVecs[_camidx];
             }
 
-            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
             if (this->is_actively_rotating()) {
                 this->instantaneous_rotation = true;
                 // Up-down (pitch) is rotation about local camera frame axis x
-                rotateCamerasLocallyAround (this->get_vertical_rotation_angle(), 1.0f, 0.0f, 0.0f);
+                this->scene.rotateCamerasLocallyAround (this->get_vertical_rotation_angle(), 1.0f, 0.0f, 0.0f);
                 // Left-and-right (yaw) is rotation about local camera frame axis y
-                rotateCamerasLocallyAround (this->get_horizontal_rotation_angle(), 0.0f, 1.0f, 0.0f);
+                this->scene.rotateCamerasLocallyAround (this->get_horizontal_rotation_angle(), 0.0f, 1.0f, 0.0f);
                 // Roll
-                rotateCamerasLocallyAround (this->get_roll_rotation_angle(), 0.0f, 0.0f, 1.0f);
-                cam_to_scene = craysim::compoundray::getCameraSpace (scene); // update
+                this->scene.rotateCamerasLocallyAround (this->get_roll_rotation_angle(), 0.0f, 0.0f, 1.0f);
+                cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene); // update
             }
             if (this->is_actively_translating()) {
                 if (this->move_state.test (craysim::visual<glver>::move_sense::up)) {
@@ -1269,7 +1261,7 @@ export namespace craysim
         // Really: perform a 2D random walk in a plane
         void walk_flying()
         {
-            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
 
             // A random walk mode
             if (!this->rrg || this->vstate.test (craysim::visual<glver>::state::walk) == false) { return; }
@@ -1277,9 +1269,9 @@ export namespace craysim
             // set rotation and step length according to the Stone paper
             this->rrg->step();
             // rrg.omega is the angular speed rrg.speed is the linear speed
-            rotateCamerasLocallyAround (this->rrg->omega, 0.0f, 1.0f, 0.0f);
+            this->scene.rotateCamerasLocallyAround (this->rrg->omega, 0.0f, 1.0f, 0.0f);
             this->instantaneous_rotation = true;
-            cam_to_scene = craysim::compoundray::getCameraSpace (scene);
+            cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
             // ti0, mv_camframe, cam_to_scene to save.
             sm::vec<float> mv_camframe = { 0, 0, this->rrg->speed };
             sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
@@ -1300,7 +1292,7 @@ export namespace craysim
 
         void walk_over_land()
         {
-            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
 
             // A random walk mode
             if (!this->rrg || this->vstate.test (craysim::visual<glver>::state::walk) == false) { return; }
@@ -1308,9 +1300,9 @@ export namespace craysim
             // set rotation and step length according to the Stone paper
             this->rrg->step();
             // rrg.omega is the angular speed rrg.speed is the linear speed
-            rotateCamerasLocallyAround (this->rrg->omega, 0.0f, 1.0f, 0.0f);
+            this->scene.rotateCamerasLocallyAround (this->rrg->omega, 0.0f, 1.0f, 0.0f);
             this->instantaneous_rotation = true;
-            cam_to_scene = craysim::compoundray::getCameraSpace (scene);
+            cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
             // ti0, mv_camframe, cam_to_scene to save.
             sm::vec<float> mv_camframe = { 0, 0, this->rrg->speed };
             sm::mat<float, 4> cam_to_scene_sv = cam_to_scene;
@@ -1370,7 +1362,7 @@ export namespace craysim
         {
             bool rtn = true;
 
-            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
 
             if (this->csv_positions.size() > this->move_counter) {
 
@@ -1415,7 +1407,7 @@ export namespace craysim
                     sm::mat<float, 4> cnl;
                     cnl.translate (cam_nextloc);
                     this->set_camera_pose (cnl);
-                    cam_to_scene = craysim::compoundray::getCameraSpace (scene);
+                    cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
                 }
 
                 if (this->sim_opts.test (craysim::options::csv_in_plane) == true) {
@@ -1449,7 +1441,7 @@ export namespace craysim
 
                     } else {
                         // Rather than throwing, could just move on to next in csv?
-                        cam_to_scene = craysim::compoundray::getCameraSpace (scene);
+                        cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
                         std::cout << "Omit csv_positions[this->move_counter] = csv_positions[" << this->move_counter << "] = "
                                   << this->csv_positions[this->move_counter] << " (failed to find triangle hit)\n";
                     }
@@ -1551,7 +1543,7 @@ export namespace craysim
 
         void start_loop_timer()
         {
-            this->fps_profiler.at_begin (craysim::best_n_samples (getCurrentEyeSamplesPerOmmatidium()));
+            this->fps_profiler.at_begin (craysim::best_n_samples (this->scene.getCurrentEyeSamplesPerOmmatidium()));
         }
 
         void end_loop_timer() { this->fps_profiler.at_end(); }
@@ -1666,7 +1658,7 @@ export namespace craysim
             std::tuple<float, std::int32_t> rtn = {};
 
             // Get the current camera space (could happen once in compute_collision_distances)
-            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (scene);
+            sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
             // Compute translations (could happen once in compute_collision_distances)
             sm::vec<float> cam_tran = cam_to_scene.translation();
             sm::mat<float, 4> tr1;
@@ -1933,22 +1925,22 @@ export namespace craysim
             // does not affect the agent's movement.
             if (this->rotation_uncertainty_degrees.sum() > 0.0f) {
                 sm::mat<float, 4> rr = this->random_rotation();
-                cam_pre_rand = craysim::compoundray::getCameraSpace (scene);
+                cam_pre_rand = craysim::compoundray::getCameraSpace (&this->scene);
                 this->set_camera_pose (cam_pre_rand * rr); // rotate camera by rr
             }
 
             std::uint32_t camidx = 0;
             // Call the compound-ray ray casting method to recompute the compound-eye view of the scene
-            renderFrame();
+            this->scene.renderFrame();
 
             // If necessary, restore camera rotation
             if (this->rotation_uncertainty_degrees.sum() > 0.0f) { this->set_camera_pose (cam_pre_rand); }
 
             // Access data so that a brain model could be fed
-            if (isCompoundEyeActive()) {
-                camidx = scene->getCameraIndex();
-                getCameraData (this->ommatidia_datas[camidx]);
-                this->ommatidias[camidx] = &scene->m_ommVecs[camidx];
+            if (this->scene.isCompoundEyeActive()) {
+                camidx = this->scene.getCameraIndex();
+                this->scene.getCameraData (this->ommatidia_datas[camidx]);
+                this->ommatidias[camidx] = &this->scene.m_ommVecs[camidx];
 
                 // if csv mode, then save the data (camidx 0 only)
                 if (camidx == 0 && this->sim_opts.all_of ({craysim::options::path_from_csv, craysim::options::save_hdf5})
@@ -1963,16 +1955,16 @@ export namespace craysim
 
             // Render any other compound eyes in the scene
             if (this->ommatidia_datas.size() > 1) {
-                nextCamera();
-                std::uint32_t _camidx = scene->getCameraIndex();
+                this->scene.nextCamera();
+                std::uint32_t _camidx = this->scene.getCameraIndex();
                 while (_camidx != camidx) {
-                    renderFrame();
-                    if (isCompoundEyeActive()) {
-                        getCameraData (this->ommatidia_datas[_camidx]);
-                        this->ommatidias[_camidx] = &scene->m_ommVecs[_camidx];
+                    this->scene.renderFrame();
+                    if (this->scene.isCompoundEyeActive()) {
+                        this->scene.getCameraData (this->ommatidia_datas[_camidx]);
+                        this->ommatidias[_camidx] = &this->scene.m_ommVecs[_camidx];
                     }
-                    nextCamera();
-                    _camidx = scene->getCameraIndex();
+                    this->scene.nextCamera();
+                    _camidx = this->scene.getCameraIndex();
                 }
             }
 
@@ -1994,7 +1986,7 @@ export namespace craysim
         void complete_recording()
         {
             if (this->sim_opts.all_of ({craysim::options::path_from_csv, craysim::options::save_hdf5})) {
-                // convert std::vector<Ommatidium>* ommatidia into vvecs that can be h5 saved
+                // convert std::vector<cray::Ommatidium>* ommatidia into vvecs that can be h5 saved
                 auto ommat = this->get_ommatidia_ptr(0);
                 sm::vvec<sm::vec<float, 3>> o_pos;
                 sm::vvec<sm::vec<float, 3>> o_dir;
@@ -2148,7 +2140,7 @@ export namespace craysim
         std::map<std::uint32_t, oces::reader> oces_reader;
         // Required in every craysim, I think. craysim::state? member of craysim::visual?
         std::map<std::uint32_t, std::vector<std::array<float, 3>>> ommatidia_datas;
-        std::map<std::uint32_t, std::vector<Ommatidium>*> ommatidias;
+        std::map<std::uint32_t, std::vector<cray::Ommatidium>*> ommatidias;
         // We keep a track of the eye size for each compound ray camera. Used in detect_camera_changes
         std::map<std::uint32_t, std::size_t> last_eye_size;
         // An mplot::VisualModel of the compound-ray eye. This is the eye in the scene. Store one
@@ -2518,16 +2510,16 @@ export namespace craysim
                     }
 
                 } else if (key == mplot::key::page_up) {
-                    int csamp = getCurrentEyeSamplesPerOmmatidium();
+                    int csamp = this->scene.getCurrentEyeSamplesPerOmmatidium();
                     if (csamp < 32000) {
-                        changeCurrentEyeSamplesPerOmmatidiumBy (csamp); // double
+                        this->scene.changeCurrentEyeSamplesPerOmmatidiumBy (csamp); // double
                     } else {
                         // else graphics memory use will get very large
                         std::cout << "max allowed samples\n";
                     }
                 } else if (key == mplot::key::page_down) {
-                    int csamp = getCurrentEyeSamplesPerOmmatidium();
-                    changeCurrentEyeSamplesPerOmmatidiumBy (-(csamp/2)); // halve
+                    int csamp = this->scene.getCurrentEyeSamplesPerOmmatidium();
+                    this->scene.changeCurrentEyeSamplesPerOmmatidiumBy (-(csamp/2)); // halve
 
                 } else if (key == mplot::key::v) { // switch view
                     // cycle between:

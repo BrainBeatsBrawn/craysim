@@ -8,7 +8,6 @@ module;
 
 // CompoundRay include files (*not* part of mathplot)
 #include <MulticamScene.h>
-#include <libEyeRenderer.h>
 #include <cuda/BufferView.h>
 #include <sutil/Matrix.h>
 
@@ -21,9 +20,6 @@ import sm.mat;
 
 import mplot.visual;
 import mplot.verticesvisual;
-
-// scene exists at global scope in libEyeRenderer.so
-extern MulticamScene* scene;
 
 export namespace craysim::compoundray
 {
@@ -61,10 +57,10 @@ export namespace craysim::compoundray
      * VisualModels in the mplot::Visual
      */
     template<int glver = mplot::gl::version_4_1>
-    void scene_to_visualmodels (MulticamScene* thescene, mplot::Visual<glver>* thevisual, bool make_navmeshes = false)
+    void scene_to_visualmodels (cray::MulticamScene* thescene, mplot::Visual<glver>* thevisual, bool make_navmeshes = false)
     {
         static constexpr bool debug_meshload = false;
-        std::vector<std::shared_ptr<MulticamScene::MeshGroup>> mymeshes = thescene->getMeshes();
+        std::vector<std::shared_ptr<cray::MulticamScene::MeshGroup>> mymeshes = thescene->getMeshes();
         std::vector<MaterialData::Pbr> mymats = thescene->getMaterials();
         for (unsigned int mi = 0; mi < mymeshes.size(); ++mi) {
             sm::mat<float, 4> tfm;
@@ -164,23 +160,25 @@ export namespace craysim::compoundray
     }
 
     // From the camera localspace, we can create a matrix which specifies a camera pose within the world frame
-    sm::mat<float, 4> getCameraSpace (MulticamScene* thescene)
+    sm::mat<float, 4> getCameraSpace (const cray::MulticamScene* thescene)
     {
-        // The camera's localspace is a set of three vectors in world coordinates
-        float3 camls_x, camls_y, camls_z;
-        thescene->getCamera()->getLocalSpace (camls_x, camls_y, camls_z);
-        // Express them as sm::vec<float>:
-        sm::vec<float> camls_xv = { camls_x.x, camls_x.y, camls_x.z };
-        sm::vec<float> camls_yv = { camls_y.x, camls_y.y, camls_y.z };
-        sm::vec<float> camls_zv = { camls_z.x, camls_z.y, camls_z.z };
+        sm::mat<float, 4> camera_space = sm::mat<float, 4>::identity();
 
-        // Start with setting the matrix from the localspace basis vectors
-        sm::mat<float, 4> camera_space = sm::mat<float, 4>::frombasis (camls_xv, camls_yv, camls_zv);
-
-        // Translate camera_space by the camera position, obtained from compound-ray
-        float3 campos = thescene->getCamera()->getPosition();
-        sm::vec<float> campos_v = { campos.x, campos.y, campos.z };
-        camera_space.pretranslate (campos_v);
+        if (thescene->getCamera() != nullptr) {
+            // The camera's localspace is a set of three vectors in world coordinates
+            float3 camls_x, camls_y, camls_z;
+            thescene->getCamera()->getLocalSpace (camls_x, camls_y, camls_z);
+            // Express them as sm::vec<float>:
+            sm::vec<float> camls_xv = { camls_x.x, camls_x.y, camls_x.z };
+            sm::vec<float> camls_yv = { camls_y.x, camls_y.y, camls_y.z };
+            sm::vec<float> camls_zv = { camls_z.x, camls_z.y, camls_z.z };
+            // Start with setting the matrix from the localspace basis vectors
+            camera_space = sm::mat<float, 4>::frombasis (camls_xv, camls_yv, camls_zv);
+            // Translate camera_space by the camera position, obtained from compound-ray
+            float3 campos = thescene->getCamera()->getPosition();
+            sm::vec<float> campos_v = { campos.x, campos.y, campos.z };
+            camera_space.pretranslate (campos_v);
+        }
 
         return camera_space;
     }
