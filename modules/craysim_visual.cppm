@@ -240,9 +240,6 @@ export namespace craysim
             this->sim_opts = prog_opts.opts;
             this->sim_opts.set (craysim::options::making_movie, prog_opts.make_movie);
 
-            // Boilerplate memory alloc for compound-ray and turn off verbose logging.
-            //multicamAlloc(); setVerbosity (false);
-
             this->lightingEffects (true);
             // Use a non-default zFar as we are likely to use large environments
             this->zFar = 2400;
@@ -311,10 +308,7 @@ export namespace craysim
             this->setSceneRotation (sm::quaternion<float>{ 0.93f, 0.16f, -0.32f, -0.056f });
         }
 
-        ~visual()
-        {
-            // Note: compound-ray shutdown occurs in MulticamScene deconstructor
-        }
+        ~visual() {}
 
         void load (const std::string& gltfpath)
         {
