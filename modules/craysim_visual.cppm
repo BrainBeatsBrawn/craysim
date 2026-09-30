@@ -786,7 +786,7 @@ export namespace craysim
                 if (this->last_eye_size.contains (camidx) == false) { this->last_eye_size[camidx] = 0u; }
 
                 if (this->ommatidia_datas[camidx].size() == 0) {
-                    if (this->scene.isCompoundEyeActive()) { this->scene.getCameraData (this->ommatidia_datas[camidx]); }
+                    if (this->scene.getCameraCount()) { this->scene.getCameraData (this->ommatidia_datas[camidx]); }
                 }
 
                 if (this->eyes.contains (camidx) == true) {
@@ -1160,11 +1160,6 @@ export namespace craysim
         // Make a keyboard based movement over the landscape
         void key_move_over_land (const float fps)
         {
-            if (this->scene.isCompoundEyeActive()) { // FIXME: I don't think this stanza is necessary here.
-                auto _camidx = this->scene.getCameraIndex();
-                this->ommatidias[_camidx] = &this->scene.m_ommVecs[_camidx];
-            }
-
             sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
             if (this->is_actively_rotating()) {
                 this->instantaneous_rotation = true;
@@ -1943,7 +1938,7 @@ export namespace craysim
             if (this->rotation_uncertainty_degrees.sum() > 0.0f) { this->set_camera_pose (cam_pre_rand); }
 
             // Access data so that a brain model could be fed
-            if (this->scene.isCompoundEyeActive()) {
+            if (this->scene.getCameraCount()) {
                 camidx = this->scene.getCameraIndex();
                 this->scene.getCameraData (this->ommatidia_datas[camidx]);
                 this->ommatidias[camidx] = &this->scene.m_ommVecs[camidx];
@@ -1965,10 +1960,8 @@ export namespace craysim
                 std::uint32_t _camidx = this->scene.getCameraIndex();
                 while (_camidx != camidx) {
                     this->scene.renderFrame();
-                    if (this->scene.isCompoundEyeActive()) {
-                        this->scene.getCameraData (this->ommatidia_datas[_camidx]);
-                        this->ommatidias[_camidx] = &this->scene.m_ommVecs[_camidx];
-                    }
+                    this->scene.getCameraData (this->ommatidia_datas[_camidx]);
+                    this->ommatidias[_camidx] = &this->scene.m_ommVecs[_camidx];
                     this->scene.nextCamera();
                     _camidx = this->scene.getCameraIndex();
                 }
