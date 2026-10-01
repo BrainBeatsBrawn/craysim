@@ -1,5 +1,5 @@
 /*
- * Helper functions for compound-ray/mathplot interoperability
+ * Helper functions for compound-ray/mathplot/oces interoperability
  *
  * Author: Seb James
  * Date: June 2025
@@ -20,6 +20,8 @@ import sm.mat;
 
 import mplot.visual;
 import mplot.verticesvisual;
+
+import oces.reader;
 
 export namespace craysim::compoundray
 {
@@ -181,6 +183,23 @@ export namespace craysim::compoundray
         }
 
         return camera_space;
+    }
+
+    // Add a camera to the scene, using sm::vecs for position and camera axes.
+    void add_camera (cray::MulticamScene* scene,
+                     const std::string& cam_name,
+                     std::vector<oces::ommatidium>* omm_vector,
+                     const std::string& eye_data_path,
+                     const sm::vec<float>& position,
+                     const sm::vec<float>& right_axis,
+                     const sm::vec<float>& up_axis,
+                     const sm::vec<float>& forward_axis)
+    {
+        const float3 position_f3 = make_float3 (position[0], position[1], position[2]);
+        const float3 ra_f3 = make_float3 (right_axis[0], right_axis[1], right_axis[2]);
+        const float3 ua_f3 = make_float3 (up_axis[0], up_axis[1], up_axis[2]);
+        const float3 fa_f3 = make_float3 (forward_axis[0], forward_axis[1], forward_axis[2]);
+        scene->addCamera (cam_name, reinterpret_cast<std::vector<cray::Ommatidium>*>(omm_vector), eye_data_path, position_f3, ra_f3, ua_f3, fa_f3);
     }
 
 } // namespace

@@ -89,6 +89,7 @@ export namespace craysim
         std::string json_config_path = {};
         std::string csv_path = {};
         std::string h5_path = {};
+        std::string oces_cam_path = {};
         std::string hovh = {};
         std::int32_t w = -1; // user-requested width
         std::int32_t h = -1;
@@ -124,6 +125,8 @@ export namespace craysim
                 rtn.json_config_path = std::string(argv[i]);
             } else if (arg == "-5") {
                 rtn.opts |= craysim::options::save_hdf5;
+            } else if (arg == "-C") {
+                rtn.oces_cam_path = std::string(argv[++i]);
             } else if (arg == "-d") {
                 // Get width and height
                 std::string wxh_str = std::string(argv[++i]);
@@ -272,6 +275,9 @@ export namespace craysim
             }
 
             this->load (prog_opts.gltf_path);
+            if (!prog_opts.oces_cam_path.empty()) {
+                this->replace_camera (prog_opts.oces_cam_path);
+            }
             // Use a FPS profiling with a text object on screen
             this->addLabel ("", {0.36f, 0.0f, -0.1f}, this->fps_label);
             this->setup_camera();
@@ -322,6 +328,67 @@ export namespace craysim
                                                             ? craysim::compoundray::blender_transform() : sutil::Matrix4x4::identity()));
             // Get the visual models from the scene
             craysim::compoundray::scene_to_visualmodels<glver> (&this->scene, this, false); // true for 'make_navmeshes'
+        }
+
+        // Bin off existing camera(s) and add a new one
+        void replace_camera (const std::string& camfilepath)
+        {
+            // Position and camera axis defaults
+            sm::vec<float> position = {};
+            sm::vec<float> right_axis = sm::vec<>::uz();
+            sm::vec<float> up_axis = sm::vec<>::uy();
+            sm::vec<float> forward_axis = sm::vec<>::ux();
+
+            if (scene.getCameraCount() > 0) {
+                if (scene.getCameraIndex() != 0) { scene.setCurrentCamera (0); }
+                auto cam = scene.getCamera();
+                auto pf3 = cam->getPosition();
+                position = { pf3.x, pf3.y, pf3.z };
+                float3 lsx, lsy, lsz;
+                cam->getLocalSpace (lsx, lsy, lsz);
+                right_axis   = { lsx.x, lsx.y, lsx.z };
+                up_axis      = { lsy.x, lsy.y, lsy.z };
+                forward_axis = { lsz.x, lsz.y, lsz.z };
+                scene.removeCameras();
+            }
+
+            this->add_camera (camfilepath, position, right_axis, up_axis, forward_axis);
+        }
+
+        // Add a camera to the scene
+        void add_camera (const std::string& camfilepath,
+                         const sm::vec<float>& position,
+                         const sm::vec<float>& right_axis,
+                         const sm::vec<float>& up_axis,
+                         const sm::vec<float>& forward_axis)
+
+        {
+            std::cout << "add_camera (" << camfilepath << ") called" << std::endl;
+            std::string name = "craysim_visual_cmd_line_camera"; // fixme use camfilepath
+
+            // Is it a .eye file, a .heye file or a .gltf (oces) file?
+            if (camfilepath.find (".eye") != std::string::npos) {
+                std::cout << "Read compoundray .eye format file (CSV)" << std::endl;
+                std::vector<cray::Ommatidium> omm_vector = cray::read_eye_file (camfilepath);
+                craysim::compoundray::add_camera (&this->scene, name, reinterpret_cast<std::vector<oces::ommatidium>*>(&omm_vector), camfilepath,
+                                                  position, right_axis, up_axis, forward_axis);
+            } else {
+                std::vector<oces::ommatidium> omm_vector = {};
+                oces::reader rdr (camfilepath, false); // false; don't ignore any mirrors specified
+                if (rdr.read_success == false) {
+                    std::cout << "Could not read OCES file " << camfilepath << " to add a camera\n";
+                    return;
+                } else {
+                    std::cout << "Success reading OCES file " << camfilepath << "\n";
+                    omm_vector = rdr.eye.omm_vector();
+                }
+                // When we add a compoundray camera, we save 'somefile.eye' as the eye file path, not 'somefile.gltf'.
+                std::string equiv_eyefilepath = camfilepath;
+                mplot::tools::stripFileSuffix (equiv_eyefilepath);
+                equiv_eyefilepath += ".eye";
+                craysim::compoundray::add_camera (&this->scene, name, &omm_vector, equiv_eyefilepath,
+                                                  sm::vec<>{0.0f, 5.5f, 0.0f}, sm::vec<>::uz(), sm::vec<>::uy(), sm::vec<>::ux());
+            }
         }
 
         void setup_camera()
@@ -386,8 +453,8 @@ export namespace craysim
                 mplot::tools::stripFileSuffix (oces_path);
                 oces_path += ".gltf";
                 // Now try to open oces_path
-                std::cout << "Attempt to load OCES file " << oces_path << "\n";
-                this->oces_reader[efp.first].read (oces_path);
+                std::cout << "Attempt to load OCES file " << oces_path << "...\n";
+                this->oces_reader[efp.first].read (oces_path, true); // true: quiet
                 if (oces_reader[efp.first].read_success == false) {
                     std::cout << "No associated OCES file for a head with this one.\n";
                 } else {
