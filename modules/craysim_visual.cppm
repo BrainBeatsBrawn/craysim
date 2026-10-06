@@ -126,6 +126,9 @@ export namespace craysim
             } else if (arg == "-5") {
                 rtn.opts |= craysim::options::save_hdf5;
             } else if (arg == "-C") {
+                // With -C add a camera path:
+                // path/to/eye.eye OR path/to/eye.heye OR path/to/eye.gltf OR path/to/eye.gltf,hex
+                // (latter 2 for OCES format, last to request the hex equivalent eye)
                 rtn.oces_cam_path = std::string(argv[++i]);
             } else if (arg == "-d") {
                 // Get width and height
@@ -152,6 +155,16 @@ export namespace craysim
             rtn.opts |= craysim::options::can_exit;
         }
 
+        // If oces_cam_path has a comma in, then the thing followng the comma may indicate 'prefer hex eye'
+        std::vector<std::string> oces_path_opts = mplot::tools::stringToVector (rtn.oces_cam_path, ",");
+        if (oces_path_opts.size() > 1) {
+            rtn.oces_cam_path = oces_path_opts[0];
+            std::cout << "Updated oces_cam_path to " << rtn.oces_cam_path << std::endl;
+            if (oces_path_opts[1].find ("hex") != std::string::npos) {
+                rtn.opts |= craysim::options::eye_is_hex;
+                std::cout << "Set eye_is_hex\n";
+            }
+        }
 
         // If csv_path had commas in it, then just use the first one.
         std::vector<std::string> cpaths = mplot::tools::stringToVector (rtn.csv_path, ",");
@@ -367,25 +380,36 @@ export namespace craysim
             std::string name = "craysim_visual_cmd_line_camera"; // fixme use camfilepath
 
             // Is it a .eye file, a .heye file or a .gltf (oces) file?
-            if (camfilepath.find (".eye") != std::string::npos) {
+            if (camfilepath.find (".eye") != std::string::npos || camfilepath.find (".heye") != std::string::npos) {
                 std::cout << "Read compoundray .eye format file (CSV)" << std::endl;
                 std::vector<cray::Ommatidium> omm_vector = cray::read_eye_file (camfilepath);
                 craysim::compoundray::add_camera (&this->scene, name, reinterpret_cast<std::vector<oces::ommatidium>*>(&omm_vector), camfilepath,
                                                   position, right_axis, up_axis, forward_axis);
             } else {
+                std::cout << "Read OCES eye/camera format\n";
                 std::vector<oces::ommatidium> omm_vector = {};
+
+                // When we add a compoundray camera, we save 'somefile.eye/heye' as the eye file path, not 'somefile.gltf'.
+                std::string equiv_eyefilepath = camfilepath;
+                mplot::tools::stripFileSuffix (equiv_eyefilepath);
+
                 oces::reader rdr (camfilepath, false); // false; don't ignore any mirrors specified
+
                 if (rdr.read_success == false) {
                     std::cout << "Could not read OCES file " << camfilepath << " to add a camera\n";
                     return;
                 } else {
                     std::cout << "Success reading OCES file " << camfilepath << "\n";
-                    omm_vector = rdr.eye.omm_vector();
+                    if (this->sim_opts.test (craysim::options::eye_is_hex) == true) {
+                        rdr.setup_hexeye();
+                        omm_vector = rdr.heye.eye.omm_vector();
+                        equiv_eyefilepath += ".heye";
+                    } else {
+                        omm_vector = rdr.eye.omm_vector();
+                        equiv_eyefilepath += ".eye";
+                    }
                 }
-                // When we add a compoundray camera, we save 'somefile.eye' as the eye file path, not 'somefile.gltf'.
-                std::string equiv_eyefilepath = camfilepath;
-                mplot::tools::stripFileSuffix (equiv_eyefilepath);
-                equiv_eyefilepath += ".eye";
+
                 craysim::compoundray::add_camera (&this->scene, name, &omm_vector, equiv_eyefilepath,
                                                   sm::vec<>{0.0f, 5.5f, 0.0f}, sm::vec<>::uz(), sm::vec<>::uy(), sm::vec<>::ux());
             }
@@ -460,7 +484,7 @@ export namespace craysim
                 } else {
                     std::cout << "Success loading OCES file " << oces_path << "\n";
                     // Make the hex-equivalent eye
-                    if (this->sim_opts.test(craysim::options::eye_is_hex) == true) {
+                    if (this->sim_opts.test (craysim::options::eye_is_hex) == true) {
                         std::cout << "Set up the hex equivalent of the OCES eye...\n";
                         this->oces_reader[efp.first].setup_hexeye();
                     }
