@@ -1,12 +1,16 @@
 #
 # Define variables of module groups for use by client projects.
 #
-macro(setup_module_variables_for_craysim craysim_directory mathplot_directory maths_directory json_directory)
+macro(setup_module_variables_for_craysim craysim_directory mathplot_directory maths_directory maths_config_directory json_directory)
 
   # load the macro 'setup_module_variables_for_maths' from module_definitions.cmake (found in the maths_directory)
   include(${maths_directory}/cmake/module_definitions.cmake)
   # Use the macro to load the SM_*_MODULES variables
-  setup_module_variables_for_maths (${maths_directory} ${json_directory})
+  setup_module_variables_for_maths (${maths_directory})
+
+  # SM_CONFIG_MODULES come from sebsjames/maths_config
+  include(${maths_config_directory}/cmake/module_definitions.cmake)
+  setup_module_variables_for_maths_config (${maths_config_directory} ${json_directory} ${maths_directory})
 
   set(CRAYSIM_MATHS_MODULES
     ${SM_HDFDATA_MODULES}
