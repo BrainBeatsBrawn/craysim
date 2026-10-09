@@ -368,6 +368,9 @@ export namespace craysim
             this->add_camera (camfilepath, position, right_axis, up_axis, forward_axis);
         }
 
+        // For reading OCES files and then being able to refer back
+        oces::reader rdr;
+
         // Add a camera to the scene
         void add_camera (const std::string& camfilepath,
                          const sm::vec<float>& position,
@@ -393,19 +396,19 @@ export namespace craysim
                 std::string equiv_eyefilepath = camfilepath;
                 mplot::tools::stripFileSuffix (equiv_eyefilepath);
 
-                oces::reader rdr (camfilepath, false); // false; don't ignore any mirrors specified
+                this->rdr.read (camfilepath);
 
-                if (rdr.read_success == false) {
+                if (this->rdr.read_success == false) {
                     std::cout << "Could not read OCES file " << camfilepath << " to add a camera\n";
                     return;
                 } else {
                     std::cout << "Success reading OCES file " << camfilepath << "\n";
                     if (this->sim_opts.test (craysim::options::eye_is_hex) == true) {
-                        rdr.setup_hexeye();
-                        omm_vector = rdr.heye.eye.omm_vector();
+                        this->rdr.setup_hexeye();
+                        omm_vector = this->rdr.heye.eye.omm_vector();
                         equiv_eyefilepath += ".heye";
                     } else {
-                        omm_vector = rdr.eye.omm_vector();
+                        omm_vector = this->rdr.eye.omm_vector();
                         equiv_eyefilepath += ".eye";
                     }
                 }
