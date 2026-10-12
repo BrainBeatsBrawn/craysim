@@ -38,9 +38,11 @@ export namespace craysim
         bool show_flat = false;
 
         // When showing flat, should we flip the hex positions in the x (left-right) direction?
+        bool first_grid_flip_lr = false;
         bool second_grid_flip_lr = false;
 
         // When showing flat, should we flip the hex positions in the y (up-down) direction?
+        bool first_grid_flip_ud = false;
         bool second_grid_flip_ud = false;
 
         // When showing flat, this is the translation that is applied to the hex vertices of the
@@ -251,6 +253,8 @@ export namespace craysim
             if (this->show_flat == false) { return; }
             if (sdo == 0) {
                 // First hexgrid
+                if (this->first_grid_flip_lr) { _vtx[0] *= -1; }
+                if (this->first_grid_flip_ud) { _vtx[1] *= -1; }
                 _vtx[0] -= this->grid_offset[0] / 2.0f;
                 _vtx[1] -= this->grid_offset[1] / 2.0f;
             } else {
