@@ -371,6 +371,9 @@ export namespace craysim
         // For reading OCES files and then being able to refer back
         oces::reader rdr;
 
+        // Our eye may have an eye hexgrid in rdr.
+        sm::hexgrid<float>* eye_hexgrid_ptr = nullptr;
+
         // Add a camera to the scene
         void add_camera (const std::string& camfilepath,
                          const sm::vec<float>& position,
@@ -407,6 +410,7 @@ export namespace craysim
                         this->rdr.setup_hexeye();
                         omm_vector = this->rdr.heye.eye.omm_vector();
                         equiv_eyefilepath += ".heye";
+                        this->eye_hexgrid_ptr = &(this->rdr.heye.hg);
                     } else {
                         omm_vector = this->rdr.eye.omm_vector();
                         equiv_eyefilepath += ".eye";
