@@ -381,7 +381,7 @@ export namespace craysim
                     this->vertex_push (vtx_0, this->vertexPositions);
 
                     // The rotation from the transformation in the hexgrid (if any)
-                    sm::mat<float, 3> lt = this->hg->tfm.linear().template as<float>();
+                    sm::mat<float, 3> lt (this->hg->tfm.template as<float>());
 
                     // NE vertex
                     if (this->ommatidia == nullptr || show_flat == true) {
