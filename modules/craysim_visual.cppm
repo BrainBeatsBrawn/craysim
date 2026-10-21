@@ -245,6 +245,10 @@ export namespace craysim
         return true;
     }
 
+    // Forward declare the visual_other struct, so that craysim::visual can declare it a friend
+    template <int glver> struct visual_other;
+
+    // Our main 'craysim' Visual, adding all the functionality we need to build our simulated worlds
     template <int glver>
     struct visual : public mplot::Visual<glver>
     {
@@ -2648,6 +2652,25 @@ export namespace craysim
                           << "v: Switch the view-follows mode\n"
                           << std::flush;
             }
+        }
+
+    private:
+        friend struct craysim::visual_other<glver>;
+    };
+
+    // 'Other' windows are like regular mplot::Visuals but allow the same key commands as the main craysim window.
+    template <int glver>
+    struct visual_other: public mplot::Visual<glver>
+    {
+        visual_other (std::int32_t width, std::int32_t height, const std::string& title, craysim::visual<glver>* _craysim_main)
+            : mplot::Visual<glver> (width, height, title) { this->craysim_main = _craysim_main; }
+
+        craysim::visual<glver>* craysim_main = nullptr;
+    protected:
+        // Pass extra key callbacks to craysim_main
+        void key_callback_extra (int key, int scancode, int action, int mods) override
+        {
+            if (craysim_main != nullptr) { craysim_main->key_callback_extra (key, scancode, action, mods); }
         }
     };
 
