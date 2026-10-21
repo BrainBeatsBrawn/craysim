@@ -97,6 +97,13 @@ export namespace craysim
         bool make_movie = false;
     };
 
+    // Movement state (class and bitset) (flags?)
+    enum class move_sense : std::uint16_t
+    {
+        forward, backward, left, right, up, down,
+        rot_up, rot_down, rot_left, rot_right, rot_roll_left, rot_roll_right
+    };
+
     // Parse cmd line to find the path and set options. Return filepath of main scene gltf file and any csv path
     parsed_inputs parse_inputs (std::int32_t argc, char* argv[])
     {
@@ -1266,9 +1273,9 @@ export namespace craysim
                 cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene); // update
             }
             if (this->is_actively_translating()) {
-                if (this->move_state.test (craysim::visual<glver>::move_sense::up)) {
+                if (this->move_state.test (move_sense::up)) {
                     this->hoverheight += 0.0001f;
-                } else if (this->move_state.test (craysim::visual<glver>::move_sense::down)) {
+                } else if (this->move_state.test (move_sense::down)) {
                     this->hoverheight -= 0.0001f;
                     if (this->hoverheight < 0.0f) { this->hoverheight = 0.0f; }
                 }
@@ -2332,12 +2339,6 @@ export namespace craysim
         // This is populated from film_director.
         std::map<std::uint32_t, mplot::direction_data> directions;
 
-        // Movement state (class and bitset) (flags?)
-        enum class move_sense : std::uint16_t
-        {
-            forward, backward, left, right, up, down,
-            rot_up, rot_down, rot_left, rot_right, rot_roll_left, rot_roll_right
-        };
         sm::flags<move_sense> move_state;
 
         // Speed of translations commanded by key press (in scene units per second). From this
