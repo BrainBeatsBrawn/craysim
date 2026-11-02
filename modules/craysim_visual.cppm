@@ -2518,9 +2518,11 @@ export namespace craysim
                 if (action != mplot::keyaction::repeat) {
                     if (key == mplot::key::end) {
                         this->kcmd_speed = this->kcmd_speed * 0.5f;
+                        this->kcmd_angular_speed = this->kcmd_angular_speed * 0.5f;
                         std::cout << "Speed reduced to " << this->kcmd_speed  << "m/s" << std::endl;
                     } else if (key == mplot::key::home) {
                         this->kcmd_speed = this->kcmd_speed * 2.0f;
+                        this->kcmd_angular_speed = this->kcmd_angular_speed * 2.0f;
                         std::cout << "Speed increased to " << this->kcmd_speed  << "m/s" << std::endl;
                     } else if (key == mplot::key::r) {
                         this->stop();
