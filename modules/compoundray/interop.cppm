@@ -65,7 +65,7 @@ export namespace craysim::compoundray
         std::vector<std::shared_ptr<cray::MulticamScene::MeshGroup>> mymeshes = thescene->getMeshes();
         std::vector<MaterialData::Pbr> mymats = thescene->getMaterials();
         for (unsigned int mi = 0; mi < mymeshes.size(); ++mi) {
-            sm::mat<float, 4> tfm;
+            auto tfm = sm::mat<float, 4>::identity();
             for (unsigned int tfi = 0; tfi < 16; ++tfi) { tfm[tfi] = mymeshes[mi]->transform[tfi]; }
             tfm.transpose_inplace(); // Need to transpose tfm after copying data
             if constexpr (debug_meshload) {
@@ -164,7 +164,7 @@ export namespace craysim::compoundray
     // From the camera localspace, we can create a matrix which specifies a camera pose within the world frame
     sm::mat<float, 4> getCameraSpace (const cray::MulticamScene* thescene)
     {
-        sm::mat<float, 4> camera_space = sm::mat<float, 4>::identity();
+        auto camera_space = sm::mat<float, 4>::identity();
 
         if (thescene->getCamera() != nullptr) {
             // The camera's localspace is a set of three vectors in world coordinates

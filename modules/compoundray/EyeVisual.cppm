@@ -156,7 +156,7 @@ export namespace craysim::compoundray
         struct projection_data
         {
             // Use this to position the 2D map wrt the three D model. You can translate, scale and rotate
-            sm::mat<float, 4> twod_transform;
+            sm::mat<float, 4> twod_transform = sm::mat<float, 4>::identity();
             // The user-provided radius of the projection sphere. Will need to match the size of the compound ray eye
             float proj_radius = 0.0f;
             // The centre of the user-provided projection sphere or cylinder
@@ -206,7 +206,7 @@ export namespace craysim::compoundray
                                        const uint32_t _start_i = 0,
                                        const uint32_t _end_i = std::numeric_limits<uint32_t>::max())
         {
-            sm::mat<float, 4> tr;
+            auto tr = sm::mat<float, 4>::identity();
             tr.translate (_twod_offset);
             this->add_spherical_projection (t, tr, centre, radius, rotn, _start_i, _end_i);
         }
@@ -360,7 +360,7 @@ export namespace craysim::compoundray
 
                     // Rotate coordinates as the compound eye looks forwards along z, whereas 2D
                     // projections look forwards along x by convention.
-                    sm::mat<float, 4> coord_rotn;
+                    auto coord_rotn = sm::mat<float, 4>::identity();
                     coord_rotn.rotate (sm::vec<>::uz(), sm::mathconst<float>::pi_over_2);
                     coord_rotn.rotate (sm::vec<>::ux(), sm::mathconst<float>::pi_over_2);
 

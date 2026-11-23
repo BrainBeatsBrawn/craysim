@@ -786,7 +786,7 @@ export namespace craysim
             sm::vec<float> cam_nextloc = nextloc;
             cam_nextloc[0] += ltstr[0];
             cam_nextloc[2] += ltstr[2]; // update only x and z
-            sm::mat<float, 4> cnl;
+            auto cnl = sm::mat<float, 4>::identity();
             cnl.translate (cam_nextloc);
             this->set_camera_pose (cnl);
             this->move_counter = 1;
@@ -1504,7 +1504,7 @@ export namespace craysim
                         } // else agent position has not changed from the last time.
                     }
 
-                    sm::mat<float, 4> cnl;
+                    auto cnl = sm::mat<float, 4>::identity();
                     cnl.translate (cam_nextloc);
                     this->set_camera_pose (cnl);
                     cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
@@ -1605,8 +1605,8 @@ export namespace craysim
         void do_crashed_movement ()
         {
             std::cout << "Loading compute_mesh_movement data from crash file\n";
-            sm::mat<float, 4> _cam_to_scene = {{}};
-            sm::mat<float, 4> _land_to_scene = {{}};
+            auto _cam_to_scene = sm::mat<float, 4>::zero();
+            auto _land_to_scene = sm::mat<float, 4>::zero();
             sm::vec<float> _mv_camframe = {};
             float _hoverheight = 0.0f;
             std::uint32_t _ti0 = 0u;
@@ -1761,9 +1761,9 @@ export namespace craysim
             sm::mat<float, 4> cam_to_scene = craysim::compoundray::getCameraSpace (&this->scene);
             // Compute translations (could happen once in compute_collision_distances)
             sm::vec<float> cam_tran = cam_to_scene.translation();
-            sm::mat<float, 4> tr1;
+            auto tr1 = sm::mat<float, 4>::identity();
             tr1.translate (cam_tran);
-            sm::mat<float, 4> tr2;
+            auto tr2 = sm::mat<float, 4>::identity();
             tr2.translate (-cam_tran);
             // In the camera's frame, y is up (could happen once in compute_collision_distances)
             sm::vec<float> cam_y = ((tr2 * cam_to_scene) * sm::vec<float>::uy()).less_one_dim();
@@ -2235,7 +2235,7 @@ export namespace craysim
         std::string path = {};
 
         // This is the start position of the camera as loaded from the gltf or as first located 'on the landscape'
-        sm::mat<float, 4> initial_camera_space;
+        sm::mat<float, 4> initial_camera_space = sm::mat<float, 4>::identity();
 
         // The following containers are 'one for each compoundray camera' and are mapped with the camera ID.
         // The eye file path(s)
@@ -2297,7 +2297,7 @@ export namespace craysim
         // Client code gives us names of the navigation landscape. If we find the landscape, store a pointer to it with this
         mplot::VisualModel<glver>* land = nullptr;
         // land's viewmatrix. converts land model to scene
-        sm::mat<float, 4> land_to_scene;
+        sm::mat<float, 4> land_to_scene = sm::mat<float, 4>::identity();
         // We can load data from a csv file for pre-defined paths. Client code populates these.
         sm::vvec<sm::vec<float, 2>> csv_positions;
         sm::vvec<sm::vec<float, 2>> csv_dirns;
@@ -2695,7 +2695,7 @@ export namespace craysim
             centre = { -0.00054, -0.00009, -0.00002 };
         }
 
-        sm::mat<float, 4> twod_tr;                            // twod projection transformation
+        auto twod_tr = sm::mat<float, 4>::identity();         // twod projection transformation
         float twod_scale = 1.0f;                              // twod projection scaling
         sm::vec<> twod_offset = { 0.0001f, 0.0f, 0.0f };      // twod projection translation to move to centre
         sm::vec<> twod_offset2 = { -0.0004f, 0.0007f, 0.0f }; // post scale/rotate translation
