@@ -2,6 +2,7 @@ module;
 
 #include <string>
 #include <iostream>
+#include <filesystem>
 #include <cstdint>
 #include <vector>
 #include <array>
@@ -12,6 +13,7 @@ module;
 #include <map>
 #include <tuple>
 #include <expected>
+#include <format>
 
 #include <MulticamScene.h>
 #include <libEyeRenderer.h> // getCurrentEyeSamplesPerOmmatidium
@@ -655,7 +657,22 @@ export namespace craysim
                 while ((vmp = this->get_next_vm_accessor()) != nullptr) {
                     if (vmp->name == search_name) {
                         this->land = vmp;
-                        this->land->make_navmesh (this->basepath);
+                        // ONE NAVMESH CACHE DIRECTORY PER SCENE FILE (2026-11-26). The cache
+                        // used to go straight in basepath (the glTF's own directory), so every
+                        // scene in that directory shared one namespace -- and the cache file is
+                        // named by mplot::VisualModel::hash(), which hashes the landscape mesh's
+                        // own vertex/normal/index arrays only. Two scenes whose floor slabs are
+                        // the same MESH placed differently by their NODE transforms therefore
+                        // hash identically with genuinely different geometry. Measured in
+                        // flow_world: engelhaaf_bollard_walls.gltf and large_gauntlet.gltf
+                        // produced the same navmesh_<hash> name, so whichever ran last silently
+                        // poisoned the other's floor -- its agent spawned 0.175m under or over
+                        // the real surface, where every horizontal sense ray misses the world
+                        // entirely. Per-scene directories make cross-scene collisions impossible
+                        // without touching the hash itself.
+                        std::string nm_dir = this->path + "_navmesh";
+                        std::filesystem::create_directories (nm_dir);
+                        this->land->make_navmesh (nm_dir);
                         if constexpr (debug_landscape) {
                             // Can add a NormalsVisual for debug
                             auto nrm = std::make_unique<mplot::NormalsVisual<glver>> (land);
